@@ -1,0 +1,15 @@
+{
+  "name": "totemvina",
+  "version": "1.0.0",
+  "description": "Duoc UC - Sede Viña del Mar - Coordinación Docente",
+  "main": "index.html",
+  "scripts": {
+    "test": "echo \"No tests specified\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@vercel/analytics": "^1.4.1"
+  }
+}
