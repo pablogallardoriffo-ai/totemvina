@@ -44,7 +44,6 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
 </script>
 <script type="text/babel" id="app-source">
 
-
         const { useState, useEffect, useMemo, useRef } = React;
 
         const Icons = {
@@ -114,9 +113,10 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                 <span className="text-xl sm:text-2xl tracking-wide leading-none text-white font-black">
                                     ¡Hola!
                                 </span>
-                                {/* Toggle Modo Oscuro Móvil (Corregido y Clickable) */}
-                                <div 
-                                    onClick={() => { setIsDarkMode(!isDarkMode); trackAction && trackAction('buttons'); }}
+                                {/* Toggle Modo Oscuro Móvil */}
+                                <button 
+                                    type="button"
+                                    onClick={(e) => { e.preventDefault(); setIsDarkMode(prev => !prev); trackAction && trackAction('buttons'); }}
                                     className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all shadow-inner cursor-pointer z-50 pointer-events-auto ${isDarkMode ? 'bg-black/40 border-slate-700' : 'bg-black/20 border-white/10'}`}
                                     title="Cambiar Tema"
                                 >
@@ -125,12 +125,11 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                         <span className={`inline-block h-2.5 w-2.5 transform rounded-full bg-white transition-transform duration-300 ease-in-out ${isDarkMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
                                     </div>
                                     <Icons.Moon cls={`w-3 h-3 transition-colors ${isDarkMode ? 'text-duoc-yellow' : 'text-white/40'}`} />
-                                </div>
+                                </button>
                             </div>
                         </div>
 
                         <div className="flex flex-col items-end justify-center shrink-0">
-                            {/* Hora en celular del mismo tamaño gigante */}
                             <div className="text-[1.75rem] sm:text-4xl leading-none font-black tracking-tighter tabular-nums text-duoc-yellow drop-shadow-sm">
                                 {hh}:{mm}:{ss}
                             </div>
@@ -737,7 +736,7 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                     <Icons.Building cls="w-10 h-10 text-duoc-yellow" />
                                 </div>
                                 <div className="flex flex-col">
-                                    <h1 className="text-2xl lg:text-4xl font-black tracking-wide text-white uppercase">Cartelera Docente</h1>
+                                    <h1 className="text-2xl lg:text-4xl font-black tracking-wide text-white uppercase">Busca Tu Clase</h1>
                                     <p className="text-sm lg:text-xl text-blue-200 dark:text-slate-400 mt-1 font-medium tracking-wide">Estado de clases en tiempo real. Toque para salir.</p>
                                 </div>
                             </div>
@@ -771,7 +770,10 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                             <div key={idx} className="flex flex-col lg:flex-row px-6 py-4 lg:px-12 lg:py-6 items-start lg:items-center hover:bg-white/5 transition-colors gap-2 lg:gap-0">
                                                 <div className="w-full flex justify-between lg:hidden mb-2 items-center">
                                                      <span className="text-lg font-black text-white tabular-nums"><Icons.Clock cls="w-4 h-4 inline mr-1 text-duoc-yellow" />{clase.horaInicio} - {clase.horaFin}</span>
-                                                     <span className={`px-3 py-1 rounded-lg text-xs font-black border ${status.bg} ${status.text} ${status.border}`}>{status.texto}</span>
+                                                     <span className={`px-3 py-1 rounded-lg text-xs font-black border flex items-center gap-1 ${status.bg} ${status.text} ${status.border}`}>
+                                                          {status.isImportant && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>}
+                                                         {status.texto}
+                                                     </span>
                                                 </div>
                                                 
                                                 <div className="hidden lg:block w-44 shrink-0 text-xl font-black text-white tabular-nums">{clase.horaInicio} - {clase.horaFin}</div>
@@ -1237,7 +1239,7 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                 
                                 {qrUrl.startsWith('file://') ? (
                                     <div className="p-4 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-xl text-sm font-bold border border-red-200 dark:border-red-800 mb-4">
-                                        Para usar esta función, debes alojar el archivo exportado en un servidor web o intranet. Actualmente es un archivo local offline.
+                                        Para que los alumnos puedan usar este QR, debes usar el botón "Exportar App" y alojar ese archivo en Vercel o Netlify.
                                     </div>
                                 ) : (
                                     <div className="mb-6 flex justify-center">
@@ -1245,11 +1247,11 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                     </div>
                                 )}
 
-                                <p className="text-xs text-slate-400 mb-2">URL configurada:</p>
+                                <p className="text-xs text-slate-400 mb-2">URL oficial:</p>
                                 <input 
                                     type="text" 
                                     value={qrUrl}
-                                    onChange={(e) => setQrUrl(e.target.value)}
+                                    readOnly
                                     className="w-full bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 text-slate-500 text-xs py-2 px-3 rounded-lg outline-none custom-scrollbar"
                                 />
                             </div>
@@ -1275,7 +1277,7 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                             Enviar Analíticas
                                         </h3>
                                         <p className="text-slate-500 dark:text-slate-400 mb-6 lg:mb-8 text-sm lg:text-lg">
-                                            Ingresa el correo institucional para recibir el reporte de métricas y evaluación del Tótem.
+                                            Ingresa el correo institucional para recibir el reporte de métricas y evaluación global.
                                         </p>
                                         
                                         <input 
@@ -1302,7 +1304,7 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                                     <div className="py-8 lg:py-10 animate-fade-in flex flex-col items-center">
                                         <div className="w-16 h-16 lg:w-20 lg:h-20 border-[6px] lg:border-8 border-slate-100 border-t-duoc-lightblue dark:border-slate-700 dark:border-t-duoc-yellow rounded-full animate-spin mb-4 lg:mb-6"></div>
                                         <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">Enviando...</h3>
-                                        <p className="text-slate-500 dark:text-slate-400 text-sm lg:text-lg">Conectando con el servidor de correo.</p>
+                                        <p className="text-slate-500 dark:text-slate-400 text-sm lg:text-lg">Generando y enviando reporte.</p>
                                     </div>
                                 )}
 
@@ -1388,9 +1390,9 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
                             </button>
                         </div>
                         
-                        {/* CONTENEDOR BOTONES DERECHA (Centrado en móvil, Derecha en Desktop) */}
+                        {/* CONTENEDOR BOTONES DERECHA */}
                         <div className="flex items-center justify-center lg:justify-end gap-2 lg:gap-4 overflow-x-auto custom-scrollbar flex-nowrap flex-1 min-w-0 py-1">
-                            {/* BOTONES PÚBLICOS (Solo visibles en Cartelera) */}
+                            {/* BOTONES PÚBLICOS */}
                             {activeTab === 'CARTELERA' && (
                                 <>
                                     {/* Botón QR Integrado */}
@@ -1450,7 +1452,6 @@ window.__INITIAL_METRICS__ = {"clicks":2,"filters":0,"buttons":0};
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     
-
 </script>
 </body>
 </html>
