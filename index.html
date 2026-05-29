@@ -665,16 +665,25 @@ if (window.supabase) {
                 window.__INITIAL_SURVEYS__ = updatedSurveys;
 
                 logEvento('encuesta_envio', {rating: surveyData.rating});
-                recentLocalSurveyRef.current = true;
                 if (window._sb) {
+                    recentLocalSurveyRef.current = true;
+                    // Safety reset: if Realtime echo never arrives, clear the flag after 6s
+                    setTimeout(() => { recentLocalSurveyRef.current = false; }, 6000);
                     try {
-                        await window._sb.from('totem_encuestas').insert({
+                        const { error: surveyErr } = await window._sb.from('totem_encuestas').insert({
                             rating: surveyData.rating,
                             comment: surveyData.comment || null,
                             name: surveyData.name || null,
                             email: surveyData.email || null
                         });
-                    } catch(e) { console.warn('Survey save error:', e); }
+                        if (surveyErr) {
+                            console.warn('Survey save error:', surveyErr);
+                            recentLocalSurveyRef.current = false;
+                        }
+                    } catch(e) {
+                        console.warn('Survey save network error:', e);
+                        recentLocalSurveyRef.current = false;
+                    }
                 }
 
                 setSurveyStep(3);
