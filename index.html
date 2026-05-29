@@ -205,6 +205,7 @@ if (window.supabase) {
             const [sessionId] = useState(() => { try { let s = sessionStorage.getItem('totem_sid'); if (!s) { s = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); sessionStorage.setItem('totem_sid', s); } return s; } catch(e) { return Date.now().toString(36); } });
             const metricsRef = useRef({ clicks: 0, filters: 0, buttons: 0 });
             const metricsSyncTimer = useRef(null);
+            const searchLogTimer = useRef(null);
             const [isConnecting, setIsConnecting] = useState(!!window._sb);
             const [emailModal, setEmailModal] = useState({ show: false, target: '', status: 'idle', errorMsg: '' });
 
@@ -244,6 +245,13 @@ if (window.supabase) {
                         ).then(() => {}).catch(() => {});
                     }, 15000);
                 }
+            };
+
+            const logEvento = (tipo, detalle) => {
+                if (!window._sb) return;
+                const payload = { session_id: sessionId, tipo };
+                if (detalle && Object.keys(detalle).length > 0) payload.detalle = detalle;
+                window._sb.from('totem_eventos').insert(payload).then(() => {}).catch(() => {});
             };
 
             // Efectos Iniciales
@@ -440,6 +448,7 @@ if (window.supabase) {
                 const file = e.target.files[0];
                 if (!file) return;
                 setError('');
+                logEvento('admin_upload_inicio', { archivo: file.name });
 
                 const reader = new FileReader();
                 reader.onload = (evt) => {
@@ -491,7 +500,7 @@ if (window.supabase) {
                 setAvailableSiglas([...new Set(datosValidos.map(i => i.seccion).filter(Boolean))].sort());
                 setIsLoaded(true);
                 setActiveTab('CARTELERA');
-                
+                logEvento('admin_upload_exito', { filas: datosValidos.length });
                 window.__INITIAL_DATA__ = datosValidos;
                 safeStorage.setItem('totem_horarios_data', JSON.stringify(datosValidos));
                 safeStorage.setItem('totem_last_updated', new Date().toLocaleString('es-CL'));
@@ -578,6 +587,7 @@ if (window.supabase) {
                 safeStorage.setItem('totem_surveys_data', JSON.stringify(updatedSurveys));
                 window.__INITIAL_SURVEYS__ = updatedSurveys;
 
+                logEvento('encuesta_envio', {rating: surveyData.rating});
                 if (window._sb) {
                     try {
                         await window._sb.from('totem_encuestas').insert({
@@ -635,6 +645,7 @@ if (window.supabase) {
                 try {
                     await new Promise(r => setTimeout(r, 2000));
                     
+                    logEvento('admin_email_enviado', { destinatario: emailModal.target });
                     setEmailModal(prev => ({...prev, status: 'success'}));
                     setTimeout(() => {
                         setEmailModal({ show: false, target: '', status: 'idle', errorMsg: '' });
@@ -727,6 +738,7 @@ if (window.supabase) {
                 if (passwordInput === '010203') {
                     if (passwordAction === 'ADMIN') {
                         setActiveTab('ADMIN');
+                        logEvento('admin_acceso');
                     } else if (passwordAction === 'FULLSCREEN_ENTER') {
                         document.documentElement.requestFullscreen().catch(() => {});
                     } else if (passwordAction === 'FULLSCREEN_EXIT') {
@@ -889,6 +901,7 @@ if (window.supabase) {
                                             setActiveFilter(newState);
                                             if (newState !== 'ALL') setActiveDia(todayName);
                                             trackAction('filters');
+                                            logEvento('filtro_rapido', {estado:'en_curso', activo: newState !== 'ALL'});
                                         }}
                                         className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all shadow-sm border-2 lg:border-[3px] flex-1 ${
                                             activeFilter === 'EN_CURSO' 
@@ -906,6 +919,7 @@ if (window.supabase) {
                                             setActiveFilter(newState);
                                             if (newState !== 'ALL') setActiveDia(todayName);
                                             trackAction('filters');
+                                            logEvento('filtro_rapido', {estado:'por_empezar', activo: newState !== 'ALL'});
                                         }}
                                         className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all shadow-sm border-2 lg:border-[3px] flex-1 ${
                                             activeFilter === 'POR_EMPEZAR' 
@@ -923,6 +937,7 @@ if (window.supabase) {
                                             setActiveFilter(newState);
                                             if (newState !== 'ALL') setActiveDia(todayName);
                                             trackAction('filters');
+                                            logEvento('filtro_rapido', {estado:'por_finalizar', activo: newState !== 'ALL'});
                                         }}
                                         className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all shadow-sm border-2 lg:border-[3px] flex-1 ${
                                             activeFilter === 'POR_FINALIZAR' 
@@ -941,26 +956,26 @@ if (window.supabase) {
                                         type="text"
                                         placeholder="Buscar ramo, profe, sala..."
                                         value={searchTerm}
-                                        onChange={(e) => { setSearchTerm(e.target.value); trackAction('filters'); }}
+                                        onChange={(e) => { setSearchTerm(e.target.value); trackAction('filters'); clearTimeout(searchLogTimer.current); if (e.target.value.length >= 2) { searchLogTimer.current = setTimeout(() => logEvento('busqueda', {termino: e.target.value}), 1500); } }}
                                         className="w-full text-base lg:text-lg py-2.5 lg:py-3 pl-12 pr-8 bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow transition-all font-semibold text-slate-800 dark:text-slate-200 placeholder:font-normal dark:placeholder:text-slate-500"
                                     />
                                     {searchTerm && <button onClick={() => { setSearchTerm(''); trackAction('filters'); }} className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-200 dark:bg-slate-700 rounded-full p-1 text-slate-500 hover:bg-slate-300"><Icons.X cls="w-4 h-4" /></button>}
                                 </div>
 
                                 <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1 lg:pb-0 shrink-0 w-full lg:w-auto">
-                                    <select disabled={activeFilter !== 'ALL'} value={activeDia} onChange={(e) => { setActiveDia(e.target.value); trackAction('filters'); }} className="flex-1 lg:flex-[1] min-w-[140px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-lg font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer disabled:opacity-50 transition-colors">
+                                    <select disabled={activeFilter !== 'ALL'} value={activeDia} onChange={(e) => { setActiveDia(e.target.value); trackAction('filters'); logEvento('filtro_dia', {dia: e.target.value}); }} className="flex-1 lg:flex-[1] min-w-[140px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-lg font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer disabled:opacity-50 transition-colors">
                                         {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'].map(dia => (
                                             <option key={dia} value={dia}>{dia === todayName ? `👉 Hoy (${dia})` : dia}</option>
                                         ))}
                                         <option value="Todos">Toda la semana</option>
                                     </select>
 
-                                    <select value={selectedSigla} onChange={(e) => { setSelectedSigla(e.target.value); trackAction('filters'); }} className="flex-1 lg:flex-[1] min-w-[120px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm lg:text-lg font-semibold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer truncate transition-colors">
+                                    <select value={selectedSigla} onChange={(e) => { setSelectedSigla(e.target.value); trackAction('filters'); logEvento('filtro_seccion', {seccion: e.target.value || 'todas'}); }} className="flex-1 lg:flex-[1] min-w-[120px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm lg:text-lg font-semibold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer truncate transition-colors">
                                         <option value="">Siglas (Todas)</option>
                                         {availableSiglas.map(sig => <option key={sig} value={sig}>{sig}</option>)}
                                     </select>
 
-                                    <select value={selectedEscuela} onChange={(e) => { setSelectedEscuela(e.target.value); trackAction('filters'); }} className="flex-[1.5] lg:flex-[1] min-w-[160px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm lg:text-lg font-semibold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer truncate transition-colors">
+                                    <select value={selectedEscuela} onChange={(e) => { setSelectedEscuela(e.target.value); trackAction('filters'); logEvento('filtro_escuela', {escuela: e.target.value || 'todas'}); }} className="flex-[1.5] lg:flex-[1] min-w-[160px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm lg:text-lg font-semibold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer truncate transition-colors">
                                         <option value="">Escuelas (Todas)</option>
                                         {availableEscuelas.map(esc => <option key={esc} value={esc}>{esc}</option>)}
                                     </select>
@@ -1110,9 +1125,9 @@ if (window.supabase) {
                                     </div>
 
                                     <div className="flex gap-2 bg-slate-200 dark:bg-slate-800 p-1.5 lg:p-2 rounded-xl lg:rounded-2xl shadow-inner overflow-x-auto w-full lg:w-auto custom-scrollbar">
-                                        <button onClick={() => setAdminSubTab('DASHBOARD')} className={`flex-1 whitespace-nowrap px-4 py-2 lg:px-6 lg:py-2.5 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all ${adminSubTab === 'DASHBOARD' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}>Estadísticas</button>
-                                        <button onClick={() => setAdminSubTab('SURVEYS')} className={`flex-1 whitespace-nowrap px-4 py-2 lg:px-6 lg:py-2.5 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all ${adminSubTab === 'SURVEYS' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}>Encuestas</button>
-                                        <button onClick={() => setAdminSubTab('UPLOAD')} className={`flex-1 whitespace-nowrap px-4 py-2 lg:px-6 lg:py-2.5 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all ${adminSubTab === 'UPLOAD' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}>Base de Datos</button>
+                                        <button onClick={() => { setAdminSubTab('DASHBOARD'); logEvento('admin_tab', {tab:'estadisticas'}); }} className={`flex-1 whitespace-nowrap px-4 py-2 lg:px-6 lg:py-2.5 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all ${adminSubTab === 'DASHBOARD' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}>Estadísticas</button>
+                                        <button onClick={() => { setAdminSubTab('SURVEYS'); logEvento('admin_tab', {tab:'encuestas'}); }} className={`flex-1 whitespace-nowrap px-4 py-2 lg:px-6 lg:py-2.5 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all ${adminSubTab === 'SURVEYS' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}>Encuestas</button>
+                                        <button onClick={() => { setAdminSubTab('UPLOAD'); logEvento('admin_tab', {tab:'base_datos'}); }} className={`flex-1 whitespace-nowrap px-4 py-2 lg:px-6 lg:py-2.5 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all ${adminSubTab === 'UPLOAD' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'}`}>Base de Datos</button>
                                     </div>
                                 </div>
 
@@ -1142,7 +1157,7 @@ if (window.supabase) {
                                                 <p className="text-sm lg:text-xl text-slate-500 dark:text-slate-400">Envíate un resumen con las métricas de uso y encuestas a tu correo.</p>
                                             </div>
                                             <button 
-                                                onClick={() => setEmailModal({show: true, target: '', status: 'idle', errorMsg: ''})}
+                                                onClick={() => { setEmailModal({show: true, target: '', status: 'idle', errorMsg: ''}); logEvento('admin_email_abrir'); }}
                                                 className="w-full md:w-auto shrink-0 flex items-center justify-center gap-2 lg:gap-3 px-6 py-3 lg:px-6 lg:py-4 bg-duoc-yellow text-duoc-blue rounded-xl font-black text-lg lg:text-xl hover:bg-yellow-400 transition-colors shadow-md"
                                             >
                                                 <Icons.Mail cls="w-5 h-5 lg:w-6 lg:h-6" /> Enviar por Correo
@@ -1221,7 +1236,7 @@ if (window.supabase) {
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center animate-fade-in px-4">
                             <div className="bg-white dark:bg-duoc-card p-6 lg:p-10 rounded-[2rem] shadow-2xl max-w-xl w-full relative border dark:border-slate-700 flex flex-col items-center text-center animate-slide-up">
                                 {surveyStep !== 3 && (
-                                    <button onClick={() => setShowSurveyModal(false)} className="absolute top-4 right-4 lg:top-6 lg:right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-slate-100 dark:bg-slate-800 p-2 rounded-full">
+                                    <button onClick={() => { setShowSurveyModal(false); logEvento('encuesta_cancelar'); }} className="absolute top-4 right-4 lg:top-6 lg:right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-slate-100 dark:bg-slate-800 p-2 rounded-full">
                                         <Icons.X cls="w-5 h-5 lg:w-6 lg:h-6"/>
                                     </button>
                                 )}
@@ -1237,7 +1252,7 @@ if (window.supabase) {
                                             {[1, 2, 3, 4, 5].map(star => (
                                                 <button 
                                                     key={star}
-                                                    onClick={() => { setSurveyData({...surveyData, rating: star}); setSurveyStep(2); }}
+                                                    onClick={() => { setSurveyData({...surveyData, rating: star}); setSurveyStep(2); logEvento('encuesta_rating', {rating: star}); }}
                                                     className="p-2 lg:p-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl lg:rounded-2xl transition-all hover:scale-110 active:scale-95 shadow-sm"
                                                 >
                                                     <Icons.Star cls="w-10 h-10 lg:w-14 lg:h-14 text-slate-300 dark:text-slate-600 hover:text-duoc-yellow transition-colors" fill="currentColor"/>
@@ -1438,7 +1453,7 @@ if (window.supabase) {
                         
                         {/* TOGGLE MODO OSCURO (DESKTOP ONLY) */}
                         <div className="hidden lg:flex items-center shrink-0">
-                            <button type="button" className="flex items-center gap-3 bg-slate-100 dark:bg-slate-800 px-4 py-2.5 rounded-full border border-slate-200 dark:border-slate-700 transition-colors shadow-inner cursor-pointer" onClick={(e) => { e.preventDefault(); setIsDarkMode(prev => !prev); trackAction('buttons'); }}>
+                            <button type="button" className="flex items-center gap-3 bg-slate-100 dark:bg-slate-800 px-4 py-2.5 rounded-full border border-slate-200 dark:border-slate-700 transition-colors shadow-inner cursor-pointer" onClick={(e) => { e.preventDefault(); setIsDarkMode(prev => { logEvento('modo_oscuro', {activo: !prev}); return !prev; }); trackAction('buttons'); }}>
                                 <Icons.Sun cls={`w-5 h-5 transition-colors ${!isDarkMode ? 'text-duoc-yellow' : 'text-slate-400'}`} />
                                 <div className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-300 focus:outline-none shadow-sm ${isDarkMode ? 'bg-duoc-yellow' : 'bg-slate-300'}`}>
                                     <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-300 ease-in-out ${isDarkMode ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -1454,7 +1469,7 @@ if (window.supabase) {
                                 <>
                                     {/* Botón QR Integrado */}
                                     <button 
-                                        onClick={() => { setShowQrModal(true); trackAction('buttons'); }}
+                                        onClick={() => { setShowQrModal(true); trackAction('buttons'); logEvento('qr_abrir'); }}
                                         className="hidden lg:flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg hover:bg-slate-50 transition-colors shadow-sm whitespace-nowrap"
                                         title="Llevar en Celular"
                                     >
@@ -1463,7 +1478,7 @@ if (window.supabase) {
 
                                     {/* Botón Encuesta Integrado */}
                                     <button 
-                                        onClick={() => { setShowSurveyModal(true); trackAction('buttons'); }}
+                                        onClick={() => { setShowSurveyModal(true); trackAction('buttons'); logEvento('encuesta_abrir'); }}
                                         className="flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-duoc-yellow text-duoc-blue rounded-lg lg:rounded-xl font-black text-sm lg:text-lg hover:bg-yellow-400 transition-colors shadow-md whitespace-nowrap"
                                         title="Evalúanos"
                                     >
@@ -1483,7 +1498,7 @@ if (window.supabase) {
 
                             {/* PANTALLA COMPLETA */}
                             <button 
-                                onClick={() => { openSecurityModal(document.fullscreenElement ? 'FULLSCREEN_EXIT' : 'FULLSCREEN_ENTER'); trackAction('buttons'); }}
+                                onClick={() => { logEvento('pantalla_completa', {accion: document.fullscreenElement ? 'salir' : 'entrar'}); openSecurityModal(document.fullscreenElement ? 'FULLSCREEN_EXIT' : 'FULLSCREEN_ENTER'); trackAction('buttons'); }}
                                 className="hidden lg:flex items-center justify-center p-2 lg:p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:text-white rounded-lg lg:rounded-xl transition-colors shadow-sm border border-transparent dark:border-slate-700 shrink-0"
                                 title="Pantalla Completa Segura"
                             >
