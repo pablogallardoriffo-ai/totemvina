@@ -1577,57 +1577,49 @@ if (window.supabase) {
                             </button>
                         </div>
                         
-                        {/* CONTENEDOR BOTONES DERECHA */}
-                        <div className="flex items-center justify-center lg:justify-end gap-2 lg:gap-4 overflow-x-auto custom-scrollbar flex-nowrap flex-1 min-w-0 py-1">
-                            {/* BOTONES PÚBLICOS */}
+                        {/* BOTONES DESKTOP */}
+                        <div className="hidden lg:flex items-center justify-end gap-4 overflow-x-auto custom-scrollbar flex-nowrap flex-1 min-w-0 py-1">
                             {activeTab === 'CARTELERA' && (
                                 <>
-                                    {/* Botón QR Integrado */}
-                                    <button 
-                                        onClick={() => { setShowQrModal(true); trackAction('buttons'); logEvento('qr_abrir'); }}
-                                        className="hidden lg:flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg hover:bg-slate-50 transition-colors shadow-sm whitespace-nowrap"
-                                        title="Llevar en Celular"
-                                    >
-                                        <Icons.QrCode cls="w-4 h-4 lg:w-5 lg:h-5" /> <span className="hidden lg:inline">Versión Móvil</span>
+                                    <button onClick={() => { setShowQrModal(true); trackAction('buttons'); logEvento('qr_abrir'); }} className="flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg hover:bg-slate-50 transition-colors shadow-sm whitespace-nowrap" title="Llevar en Celular">
+                                        <Icons.QrCode cls="w-4 h-4 lg:w-5 lg:h-5" /> Versión Móvil
                                     </button>
-
-                                    {/* Botón Encuesta Integrado */}
-                                    <button 
-                                        onClick={() => { setShowSurveyModal(true); trackAction('buttons'); logEvento('encuesta_abrir'); }}
-                                        className="flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-duoc-yellow text-duoc-blue rounded-lg lg:rounded-xl font-black text-sm lg:text-lg hover:bg-yellow-400 transition-colors shadow-md whitespace-nowrap"
-                                        title="Evalúanos"
-                                    >
+                                    <button onClick={() => { setShowSurveyModal(true); trackAction('buttons'); logEvento('encuesta_abrir'); }} className="flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-duoc-yellow text-duoc-blue rounded-lg lg:rounded-xl font-black text-sm lg:text-lg hover:bg-yellow-400 transition-colors shadow-md whitespace-nowrap" title="Evalúanos">
                                         <Icons.Star cls="w-4 h-4 lg:w-5 lg:h-5" fill="currentColor" /> ¡Evalúanos!
                                     </button>
-
-                                    {/* Botón Exportar App */}
-                                    <button 
-                                        onClick={() => { handleExportInteractiveTotem(); trackAction('buttons'); }}
-                                        className="hidden lg:flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-duoc-lightblue/10 dark:bg-slate-800 text-duoc-lightblue dark:text-slate-300 border border-transparent dark:border-slate-700 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg hover:bg-duoc-lightblue/20 dark:hover:text-white transition-colors shadow-sm whitespace-nowrap"
-                                        title="Descargar Tótem Interactivo"
-                                    >
+                                    <button onClick={() => { handleExportInteractiveTotem(); trackAction('buttons'); }} className="flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 bg-duoc-lightblue/10 dark:bg-slate-800 text-duoc-lightblue dark:text-slate-300 border border-transparent dark:border-slate-700 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg hover:bg-duoc-lightblue/20 dark:hover:text-white transition-colors shadow-sm whitespace-nowrap">
                                         <Icons.Download cls="w-4 h-4 lg:w-5 lg:h-5" /> Exportar App
                                     </button>
                                 </>
                             )}
-
-                            {/* PANTALLA COMPLETA */}
-                            <button 
-                                onClick={() => { logEvento('pantalla_completa', {accion: document.fullscreenElement ? 'salir' : 'entrar'}); openSecurityModal(document.fullscreenElement ? 'FULLSCREEN_EXIT' : 'FULLSCREEN_ENTER'); trackAction('buttons'); }}
-                                className="hidden lg:flex items-center justify-center p-2 lg:p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:text-white rounded-lg lg:rounded-xl transition-colors shadow-sm border border-transparent dark:border-slate-700 shrink-0"
-                                title="Pantalla Completa Segura"
-                            >
+                            <button onClick={() => { logEvento('pantalla_completa', {accion: document.fullscreenElement ? 'salir' : 'entrar'}); openSecurityModal(document.fullscreenElement ? 'FULLSCREEN_EXIT' : 'FULLSCREEN_ENTER'); trackAction('buttons'); }} className="flex items-center justify-center p-2 lg:p-3 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:text-white rounded-lg lg:rounded-xl transition-colors shadow-sm border border-transparent dark:border-slate-700 shrink-0" title="Pantalla Completa">
                                 <Icons.Fullscreen cls="w-4 h-4 lg:w-5 lg:h-5" />
                             </button>
-                            
-                            {/* BOTON DE ADMIN / VOLVER */}
                             {activeTab === 'CARTELERA' ? (
-                                <button onClick={() => { openSecurityModal('ADMIN'); trackAction('buttons'); }} className="flex items-center gap-1 lg:gap-1.5 px-2.5 py-2 lg:px-5 lg:py-3 rounded-lg lg:rounded-xl font-bold text-xs lg:text-lg transition-all border bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent dark:border-slate-700 hover:bg-slate-200 dark:hover:text-white shadow-sm whitespace-nowrap">
-                                    <Icons.Settings cls="w-4 h-4 lg:w-5 lg:h-5" /> <span className="hidden sm:inline">Admin</span>
+                                <button onClick={() => { openSecurityModal('ADMIN'); trackAction('buttons'); }} className="flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all border bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent dark:border-slate-700 hover:bg-slate-200 dark:hover:text-white shadow-sm whitespace-nowrap">
+                                    <Icons.Settings cls="w-4 h-4 lg:w-5 lg:h-5" /> Admin
                                 </button>
                             ) : (
                                 <button onClick={() => { setActiveTab('CARTELERA'); setAdminSubTab('DASHBOARD'); trackAction('buttons'); }} className="flex items-center gap-1.5 lg:gap-2 px-4 py-2 lg:px-6 lg:py-3 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all border bg-duoc-blue dark:bg-slate-800 text-white dark:text-duoc-yellow border-transparent dark:border-slate-700 shadow-md hover:bg-[#004080] dark:hover:bg-slate-700 whitespace-nowrap">
                                     <Icons.LayoutList cls="w-4 h-4 lg:w-5 lg:h-5" /> Vista Estudiantes
+                                </button>
+                            )}
+                        </div>
+
+                        {/* BARRA NAVEGACIÓN MÓVIL */}
+                        <div className="flex lg:hidden w-full gap-2">
+                            {activeTab === 'CARTELERA' ? (
+                                <>
+                                    <button onClick={() => { setShowSurveyModal(true); trackAction('buttons'); logEvento('encuesta_abrir'); }} className="flex-1 flex items-center justify-center gap-2 py-3 bg-duoc-yellow text-duoc-blue rounded-xl font-black text-sm shadow-md active:scale-95 transition-transform">
+                                        <Icons.Star cls="w-5 h-5" fill="currentColor" /> Evaluar
+                                    </button>
+                                    <button onClick={() => { openSecurityModal('ADMIN'); trackAction('buttons'); }} className="flex-1 flex items-center justify-center gap-2 py-3 bg-[#00274c] dark:bg-slate-800 text-white dark:text-duoc-yellow rounded-xl font-bold text-sm shadow-md active:scale-95 transition-transform border border-transparent dark:border-slate-700">
+                                        <Icons.Settings cls="w-5 h-5" /> Admin
+                                    </button>
+                                </>
+                            ) : (
+                                <button onClick={() => { setActiveTab('CARTELERA'); setAdminSubTab('DASHBOARD'); trackAction('buttons'); }} className="flex-1 flex items-center justify-center gap-2 py-3 bg-duoc-blue text-white rounded-xl font-bold text-sm shadow-md active:scale-95 transition-transform">
+                                    <Icons.LayoutList cls="w-5 h-5" /> Vista Estudiantes
                                 </button>
                             )}
                         </div>
