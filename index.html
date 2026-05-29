@@ -665,16 +665,25 @@ if (window.supabase) {
                 window.__INITIAL_SURVEYS__ = updatedSurveys;
 
                 logEvento('encuesta_envio', {rating: surveyData.rating});
-                recentLocalSurveyRef.current = true;
                 if (window._sb) {
+                    recentLocalSurveyRef.current = true;
+                    // Safety reset: if Realtime echo never arrives, clear the flag after 6s
+                    setTimeout(() => { recentLocalSurveyRef.current = false; }, 6000);
                     try {
-                        await window._sb.from('totem_encuestas').insert({
+                        const { error: surveyErr } = await window._sb.from('totem_encuestas').insert({
                             rating: surveyData.rating,
                             comment: surveyData.comment || null,
                             name: surveyData.name || null,
                             email: surveyData.email || null
                         });
-                    } catch(e) { console.warn('Survey save error:', e); }
+                        if (surveyErr) {
+                            console.warn('Survey save error:', surveyErr);
+                            recentLocalSurveyRef.current = false;
+                        }
+                    } catch(e) {
+                        console.warn('Survey save network error:', e);
+                        recentLocalSurveyRef.current = false;
+                    }
                 }
 
                 setSurveyStep(3);
@@ -1339,8 +1348,8 @@ if (window.supabase) {
                     )}
 
                     {showSurveyModal && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-center justify-center animate-fade-in px-4">
-                            <div className="bg-white dark:bg-duoc-card p-6 lg:p-10 rounded-[2rem] shadow-2xl max-w-xl w-full relative border dark:border-slate-700 flex flex-col items-center text-center animate-slide-up">
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center animate-fade-in sm:px-4">
+                            <div className="bg-white dark:bg-duoc-card p-5 sm:p-6 lg:p-10 rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl max-w-xl w-full relative border dark:border-slate-700 flex flex-col items-center text-center animate-slide-up overflow-y-auto max-h-[92dvh]">
                                 {surveyStep !== 3 && (
                                     <button onClick={() => { setShowSurveyModal(false); logEvento('encuesta_cancelar'); }} className="absolute top-4 right-4 lg:top-6 lg:right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-slate-100 dark:bg-slate-800 p-2 rounded-full">
                                         <Icons.X cls="w-5 h-5 lg:w-6 lg:h-6"/>
@@ -1354,14 +1363,14 @@ if (window.supabase) {
                                         </div>
                                         <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">¡Queremos Mejorar!</h3>
                                         <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-8">¿Cómo evaluarías tu experiencia usando este Tótem?</p>
-                                        <div className="flex gap-2 lg:gap-3 mb-4 lg:mb-6">
+                                        <div className="flex gap-1.5 sm:gap-2 lg:gap-3 mb-4 lg:mb-6 justify-center flex-wrap">
                                             {[1, 2, 3, 4, 5].map(star => (
-                                                <button 
+                                                <button
                                                     key={star}
                                                     onClick={() => { setSurveyData({...surveyData, rating: star}); setSurveyStep(2); logEvento('encuesta_rating', {rating: star}); }}
-                                                    className="p-2 lg:p-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl lg:rounded-2xl transition-all hover:scale-110 active:scale-95 shadow-sm"
+                                                    className="p-1.5 sm:p-2 lg:p-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-xl lg:rounded-2xl transition-all hover:scale-110 active:scale-95 shadow-sm"
                                                 >
-                                                    <Icons.Star cls="w-10 h-10 lg:w-14 lg:h-14 text-slate-300 dark:text-slate-600 hover:text-duoc-yellow transition-colors" fill="currentColor"/>
+                                                    <Icons.Star cls="w-9 h-9 sm:w-10 sm:h-10 lg:w-14 lg:h-14 text-slate-300 dark:text-slate-600 hover:text-duoc-yellow transition-colors" fill="currentColor"/>
                                                 </button>
                                             ))}
                                         </div>
@@ -1613,8 +1622,8 @@ if (window.supabase) {
                             
                             {/* BOTON DE ADMIN / VOLVER */}
                             {activeTab === 'CARTELERA' ? (
-                                <button onClick={() => { openSecurityModal('ADMIN'); trackAction('buttons'); }} className="hidden lg:flex items-center gap-1.5 lg:gap-2 px-3 py-2 lg:px-5 lg:py-3 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all border bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent dark:border-slate-700 hover:bg-slate-200 dark:hover:text-white shadow-sm whitespace-nowrap">
-                                    <Icons.Settings cls="w-4 h-4 lg:w-5 lg:h-5" /> Admin
+                                <button onClick={() => { openSecurityModal('ADMIN'); trackAction('buttons'); }} className="flex items-center gap-1 lg:gap-1.5 px-2.5 py-2 lg:px-5 lg:py-3 rounded-lg lg:rounded-xl font-bold text-xs lg:text-lg transition-all border bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-transparent dark:border-slate-700 hover:bg-slate-200 dark:hover:text-white shadow-sm whitespace-nowrap">
+                                    <Icons.Settings cls="w-4 h-4 lg:w-5 lg:h-5" /> <span className="hidden sm:inline">Admin</span>
                                 </button>
                             ) : (
                                 <button onClick={() => { setActiveTab('CARTELERA'); setAdminSubTab('DASHBOARD'); trackAction('buttons'); }} className="flex items-center gap-1.5 lg:gap-2 px-4 py-2 lg:px-6 lg:py-3 rounded-lg lg:rounded-xl font-bold text-sm lg:text-lg transition-all border bg-duoc-blue dark:bg-slate-800 text-white dark:text-duoc-yellow border-transparent dark:border-slate-700 shadow-md hover:bg-[#004080] dark:hover:bg-slate-700 whitespace-nowrap">
