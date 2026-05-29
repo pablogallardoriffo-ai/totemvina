@@ -28,6 +28,7 @@ tailwind.config = { darkMode: "class", theme: { extend: { fontFamily: { sans: ["
 .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border: 4px solid #0f172a; }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #475569; }
 body { font-family: "Montserrat", system-ui, sans-serif; overflow: hidden; }
+.app-shell { height: 100vh; height: 100dvh; }
 @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
 .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -864,6 +865,7 @@ if (window.supabase) {
                     '.dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #334155; border: 4px solid #0f172a; }',
                     '.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #475569; }',
                     'body { font-family: "Montserrat", system-ui, sans-serif; overflow: hidden; }',
+                    '.app-shell { height: 100vh; height: 100dvh; }',
                     '@keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }',
                     '.animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }',
                     '@keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }',
@@ -930,7 +932,7 @@ if (window.supabase) {
 
             if (!isLoaded) {
                 return (
-                    <div className="h-screen w-screen flex flex-col items-center justify-center p-4 lg:p-8 select-none bg-duoc-blue dark:bg-duoc-darker transition-colors duration-300 overflow-y-auto">
+                    <div className="app-shell w-screen flex flex-col items-center justify-center p-4 lg:p-8 select-none bg-duoc-blue dark:bg-duoc-darker transition-colors duration-300 overflow-y-auto">
                         <div className="bg-white dark:bg-duoc-card p-6 lg:p-12 rounded-[2rem] shadow-2xl w-full max-w-3xl text-center border-b-8 border-duoc-yellow m-auto">
                             <div className="w-16 h-16 lg:w-24 lg:h-24 mx-auto bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
                                 <Icons.Building cls="w-8 h-8 lg:w-12 lg:h-12 text-duoc-blue dark:text-duoc-yellow" />
@@ -965,7 +967,7 @@ if (window.supabase) {
                 const ss = filterTime.getSeconds().toString().padStart(2, '0');
 
                 return (
-                    <div className="h-screen w-screen bg-duoc-blue dark:bg-duoc-darker text-white flex flex-col cursor-pointer overflow-hidden animate-fade-in" onClick={() => setShowSuspension(false)}>
+                    <div className="app-shell w-screen bg-duoc-blue dark:bg-duoc-darker text-white flex flex-col cursor-pointer overflow-hidden animate-fade-in" onClick={() => setShowSuspension(false)}>
                         <header className="px-6 py-6 lg:px-12 lg:py-8 flex justify-between items-center border-b-[2px] border-white/10 bg-black/20 shrink-0">
                             <div className="flex items-center gap-4 lg:gap-6">
                                 <div className="hidden lg:flex w-20 h-20 bg-white/10 rounded-2xl items-center justify-center">
@@ -1051,13 +1053,13 @@ if (window.supabase) {
             }
 
             return (
-                <div className="h-screen w-screen flex flex-col select-none relative bg-slate-100 dark:bg-duoc-dark transition-colors duration-300">
+                <div className="app-shell w-screen flex flex-col select-none relative bg-slate-100 dark:bg-duoc-dark transition-colors duration-300">
                     
                     <ClockHeader isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} trackAction={trackAction} />
 
                     {/* VISTA: CARTELERA (PÚBLICA) */}
                     {activeTab === 'CARTELERA' && (
-                        <div className="flex-1 flex flex-col overflow-hidden animate-fade-in">
+                        <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
                             {/* FILTROS Y ACCIONES PÚBLICAS */}
                             <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col lg:flex-row gap-3 shadow-sm z-0 items-stretch lg:items-center overflow-x-auto transition-colors duration-300 custom-scrollbar">
                                 
@@ -1283,7 +1285,7 @@ if (window.supabase) {
                     )}
 
                     {activeTab === 'ADMIN' && (
-                        <div className="flex-1 flex flex-col p-4 lg:p-10 bg-slate-50 dark:bg-duoc-dark animate-fade-in transition-colors duration-300 overflow-y-auto custom-scrollbar">
+                        <div className="flex-1 min-h-0 flex flex-col p-4 lg:p-10 bg-slate-50 dark:bg-duoc-dark animate-fade-in transition-colors duration-300 overflow-y-auto custom-scrollbar">
                             <div className="max-w-7xl mx-auto w-full">
                                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8 lg:mb-10 shrink-0">
                                     <div className="flex items-center gap-4">
@@ -1500,8 +1502,8 @@ if (window.supabase) {
                     )}
 
                     {showSurveyModal && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center animate-fade-in sm:px-4">
-                            <div className="bg-white dark:bg-duoc-card p-5 sm:p-6 lg:p-10 rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl max-w-xl w-full relative border dark:border-slate-700 flex flex-col items-center text-center animate-slide-up overflow-y-auto max-h-[92dvh]">
+                        <div className="fixed inset-x-0 top-0 h-[100dvh] bg-slate-900/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center animate-fade-in sm:px-4">
+                            <div className="bg-white dark:bg-duoc-card p-5 sm:p-6 lg:p-10 rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl max-w-xl w-full relative border dark:border-slate-700 flex flex-col items-center text-center animate-slide-up overflow-y-auto max-h-[92dvh] pb-[max(1.25rem,env(safe-area-inset-bottom))]">
                                 {surveyStep !== 3 && (
                                     <button onClick={() => { setShowSurveyModal(false); logEvento('encuesta_cancelar'); }} className="absolute top-4 right-4 lg:top-6 lg:right-6 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors bg-slate-100 dark:bg-slate-800 p-2 rounded-full">
                                         <Icons.X cls="w-5 h-5 lg:w-6 lg:h-6"/>
