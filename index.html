@@ -221,6 +221,8 @@ if (window.supabase) {
             const [emailModal, setEmailModal] = useState({ show: false, target: '', status: 'idle', errorMsg: '' });
             const [analytics, setAnalytics] = useState({ loaded: false, totals: { interacciones: 0, clicks: 0, filtros: 0, botones: 0, sesiones: 0, eventos: 0 }, porDia: {}, porTipo: {} });
             const [periodo, setPeriodo] = useState('dia');
+            const [adminPin, setAdminPin] = useState('010203');
+            const [pinChange, setPinChange] = useState({ current: '', next: '', confirm: '', status: 'idle', msg: '' });
 
             const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
             const todayName = diasSemana[filterTime.getDay()];
@@ -462,6 +464,8 @@ if (window.supabase) {
                 };
 
                 const init = async () => {
+                    const cachedPin = safeStorage.getItem('totem_admin_pin');
+                    if (cachedPin) setAdminPin(cachedPin);
                     if (window._sb) {
                         try {
                             const { data: rows, error } = await window._sb
@@ -494,6 +498,14 @@ if (window.supabase) {
                             const cached = safeStorage.getItem('totem_surveys_data');
                             if (cached) { try { setSurveys(JSON.parse(cached)); } catch(e2) {} }
                         }
+                        try {
+                            const { data: cfg } = await window._sb
+                                .from('totem_config').select('value').eq('key', 'admin_pin').maybeSingle();
+                            if (cfg && cfg.value) {
+                                setAdminPin(cfg.value);
+                                safeStorage.setItem('totem_admin_pin', cfg.value);
+                            }
+                        } catch(e) {}
                     } else {
                         const cached = safeStorage.getItem('totem_horarios_data');
                         if (cached) { try { const d = JSON.parse(cached); if (d.length) applyData(d); } catch(e) {} }
@@ -904,7 +916,7 @@ if (window.supabase) {
             };
 
             const handlePasswordSubmit = () => {
-                if (passwordInput === '010203') {
+                if (passwordInput === adminPin) {
                     if (passwordAction === 'ADMIN') {
                         setActiveTab('ADMIN');
                         logEvento('admin_acceso');
@@ -928,6 +940,44 @@ if (window.supabase) {
             const openSecurityModal = (actionType) => {
                 setPasswordAction(actionType);
                 setShowPasswordModal(true);
+            };
+
+            const handleChangePin = async () => {
+                const current = pinChange.current.trim();
+                const next = pinChange.next.trim();
+                const confirm = pinChange.confirm.trim();
+                if (current !== adminPin) {
+                    setPinChange(p => ({ ...p, status: 'error', msg: 'La contraseña actual es incorrecta.' }));
+                    return;
+                }
+                if (next.length < 4) {
+                    setPinChange(p => ({ ...p, status: 'error', msg: 'La nueva contraseña debe tener al menos 4 caracteres.' }));
+                    return;
+                }
+                if (next !== confirm) {
+                    setPinChange(p => ({ ...p, status: 'error', msg: 'La confirmación no coincide.' }));
+                    return;
+                }
+                if (next === adminPin) {
+                    setPinChange(p => ({ ...p, status: 'error', msg: 'La nueva contraseña es igual a la actual.' }));
+                    return;
+                }
+                setPinChange(p => ({ ...p, status: 'saving', msg: '' }));
+                try {
+                    if (window._sb) {
+                        const { error } = await window._sb.from('totem_config').upsert(
+                            { key: 'admin_pin', value: next, updated_at: new Date().toISOString() },
+                            { onConflict: 'key' }
+                        );
+                        if (error) throw error;
+                    }
+                    setAdminPin(next);
+                    safeStorage.setItem('totem_admin_pin', next);
+                    logEvento('admin_pin_cambio');
+                    setPinChange({ current: '', next: '', confirm: '', status: 'success', msg: '✓ Contraseña actualizada. Aplica en todos los dispositivos.' });
+                } catch (e) {
+                    setPinChange(p => ({ ...p, status: 'error', msg: 'No se pudo guardar. Revisa la conexión e intenta de nuevo.' }));
+                }
             };
 
             if (!isLoaded) {
@@ -1485,16 +1535,43 @@ if (window.supabase) {
                                 )}
 
                                 {adminSubTab === 'UPLOAD' && (
-                                    <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-8 lg:p-12 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 text-center relative overflow-hidden animate-fade-in">
-                                        <Icons.Upload cls="w-16 h-16 lg:w-20 lg:h-20 mx-auto text-duoc-lightblue dark:text-slate-400 mb-4 lg:mb-6" />
-                                        <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">Reemplazar Base de Datos</h3>
-                                        <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-10 max-w-2xl mx-auto">Selecciona la Sábana Excel más reciente provista por Coordinación. Este proceso actualizará todas las clases mostradas.</p>
-                                        
-                                        <label className="cursor-pointer inline-flex flex-col items-center justify-center border-2 lg:border-4 border-dashed border-blue-200 dark:border-slate-600 bg-blue-50/50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors py-6 px-10 lg:py-10 lg:px-24 rounded-2xl lg:rounded-3xl mx-auto w-full lg:w-auto">
-                                            <span className="text-lg lg:text-2xl font-bold text-duoc-blue dark:text-slate-200 mb-1 lg:mb-2">Seleccionar Archivo .XLSX</span>
-                                            <span className="text-sm lg:text-lg text-slate-400 font-medium">Haz clic aquí para examinar</span>
-                                            <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
-                                        </label>
+                                    <div className="flex flex-col gap-6 lg:gap-8 animate-fade-in">
+                                        <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-8 lg:p-12 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 text-center relative overflow-hidden">
+                                            <Icons.Upload cls="w-16 h-16 lg:w-20 lg:h-20 mx-auto text-duoc-lightblue dark:text-slate-400 mb-4 lg:mb-6" />
+                                            <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">Reemplazar Base de Datos</h3>
+                                            <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-10 max-w-2xl mx-auto">Selecciona la Sábana Excel más reciente provista por Coordinación. Este proceso actualizará todas las clases mostradas.</p>
+                                            <label className="cursor-pointer inline-flex flex-col items-center justify-center border-2 lg:border-4 border-dashed border-blue-200 dark:border-slate-600 bg-blue-50/50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors py-6 px-10 lg:py-10 lg:px-24 rounded-2xl lg:rounded-3xl mx-auto w-full lg:w-auto">
+                                                <span className="text-lg lg:text-2xl font-bold text-duoc-blue dark:text-slate-200 mb-1 lg:mb-2">Seleccionar Archivo .XLSX</span>
+                                                <span className="text-sm lg:text-lg text-slate-400 font-medium">Haz clic aquí para examinar</span>
+                                                <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
+                                            </label>
+                                        </div>
+
+                                        {/* ── Cambiar contraseña de administrador ── */}
+                                        <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-6 lg:p-10 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <div className="flex items-center gap-3 mb-5 lg:mb-6">
+                                                <div className="w-11 h-11 lg:w-14 lg:h-14 bg-duoc-blue/10 dark:bg-duoc-yellow/15 text-duoc-blue dark:text-duoc-yellow rounded-full flex items-center justify-center shrink-0"><Icons.Lock cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
+                                                <div>
+                                                    <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white">Cambiar contraseña</h3>
+                                                    <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-medium">Clave maestra del panel · se aplica en todos los dispositivos</p>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 lg:gap-4 mb-4">
+                                                <input type="password" inputMode="numeric" autoComplete="off" placeholder="Contraseña actual" value={pinChange.current} onChange={e => setPinChange(p => ({ ...p, current: e.target.value, status: 'idle', msg: '' }))} className="bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-base outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow dark:text-white" />
+                                                <input type="password" inputMode="numeric" autoComplete="new-password" placeholder="Nueva contraseña" value={pinChange.next} onChange={e => setPinChange(p => ({ ...p, next: e.target.value, status: 'idle', msg: '' }))} className="bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-base outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow dark:text-white" />
+                                                <input type="password" inputMode="numeric" autoComplete="new-password" placeholder="Repetir nueva" value={pinChange.confirm} onChange={e => setPinChange(p => ({ ...p, confirm: e.target.value, status: 'idle', msg: '' }))} onKeyDown={e => e.key === 'Enter' && handleChangePin()} className="bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-base outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow dark:text-white" />
+                                            </div>
+                                            <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                                                <div className="text-sm lg:text-base font-semibold min-h-[1.25rem] order-2 sm:order-1">
+                                                    {pinChange.status === 'error' && <span className="text-red-500 dark:text-red-400">{pinChange.msg}</span>}
+                                                    {pinChange.status === 'success' && <span className="text-green-600 dark:text-green-400">{pinChange.msg}</span>}
+                                                    {pinChange.status === 'saving' && <span className="text-slate-400">Guardando…</span>}
+                                                </div>
+                                                <button onClick={handleChangePin} disabled={pinChange.status === 'saving'} className="order-1 sm:order-2 w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 px-6 py-3 bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl font-black text-base lg:text-lg hover:opacity-90 transition-opacity shadow-md disabled:opacity-50">
+                                                    <Icons.Lock cls="w-5 h-5" /> Actualizar contraseña
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>
