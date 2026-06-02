@@ -223,6 +223,7 @@ if (window.supabase) {
             const [periodo, setPeriodo] = useState('dia');
             const [adminPin, setAdminPin] = useState('010203');
             const [pinChange, setPinChange] = useState({ current: '', next: '', confirm: '', status: 'idle', msg: '' });
+            const [sabanaInfo, setSabanaInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
 
             const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
             const todayName = diasSemana[filterTime.getDay()];
@@ -467,17 +468,37 @@ if (window.supabase) {
                     const cachedPin = safeStorage.getItem('totem_admin_pin');
                     if (cachedPin) setAdminPin(cachedPin);
                     if (window._sb) {
+                        let cargado = false;
+                        // 1) Sábana subida desde el panel (fuente de verdad para todos los dispositivos)
                         try {
-                            const { data: rows, error } = await window._sb
-                                .from('v_horarios_totem').select('*').limit(10000);
-                            if (!error && rows && rows.length > 0) {
-                                applyData(rows);
-                                safeStorage.setItem('totem_horarios_data', JSON.stringify(rows));
-                            } else {
-                                const cached = safeStorage.getItem('totem_horarios_data');
-                                if (cached) { try { const d = JSON.parse(cached); if (d.length) applyData(d); } catch(e2) {} }
+                            const { data: sab, error: sabErr } = await window._sb
+                                .from('totem_sabana')
+                                .select('data, archivo_nombre, total_filas, actualizado_en')
+                                .eq('id', 1).maybeSingle();
+                            if (!sabErr && sab && Array.isArray(sab.data) && sab.data.length > 0) {
+                                applyData(sab.data);
+                                safeStorage.setItem('totem_horarios_data', JSON.stringify(sab.data));
+                                const fechaTxt = sab.actualizado_en ? new Date(sab.actualizado_en).toLocaleString('es-CL') : '';
+                                if (fechaTxt) safeStorage.setItem('totem_last_updated', fechaTxt);
+                                if (sab.archivo_nombre) safeStorage.setItem('totem_sabana_nombre', sab.archivo_nombre);
+                                setSabanaInfo({ status: 'sync', nombre: sab.archivo_nombre || '', fecha: fechaTxt, filas: sab.total_filas || sab.data.length, descargando: false });
+                                cargado = true;
                             }
-                        } catch(fetchErr) {
+                        } catch(e) {}
+                        // 2) Vista de horarios del proyecto de reservas (si aún no se ha subido una sábana)
+                        if (!cargado) {
+                            try {
+                                const { data: rows, error } = await window._sb
+                                    .from('v_horarios_totem').select('*').limit(10000);
+                                if (!error && rows && rows.length > 0) {
+                                    applyData(rows);
+                                    safeStorage.setItem('totem_horarios_data', JSON.stringify(rows));
+                                    cargado = true;
+                                }
+                            } catch(fetchErr) {}
+                        }
+                        // 3) Caché local
+                        if (!cargado) {
                             const cached = safeStorage.getItem('totem_horarios_data');
                             if (cached) { try { const d = JSON.parse(cached); if (d.length) applyData(d); } catch(e2) {} }
                         }
@@ -512,6 +533,9 @@ if (window.supabase) {
                         const cachedSurveys = safeStorage.getItem('totem_surveys_data');
                         if (cachedSurveys) { try { setSurveys(JSON.parse(cachedSurveys)); } catch(e) {} }
                     }
+                    // Restaurar info de última carga (para el panel) si aún no se obtuvo del servidor
+                    const lastUp = safeStorage.getItem('totem_last_updated');
+                    if (lastUp) setSabanaInfo(prev => prev.fecha ? prev : { ...prev, fecha: lastUp, nombre: safeStorage.getItem('totem_sabana_nombre') || prev.nombre });
                     cargarAnaliticas();
                     setIsConnecting(false);
                 };
@@ -574,11 +598,40 @@ if (window.supabase) {
                     )
                     .subscribe();
 
-                realtimeChannelsRef.current = [presenceChannel, surveyChannel];
+                // Realtime: nueva sábana subida desde el panel → refrescar horarios en todos los tótems
+                // Escucha la tabla "señal" (diminuta) y refresca los datos pesados vía REST.
+                const sabanaChannel = window._sb
+                    .channel('totem_sabana_rt')
+                    .on('postgres_changes',
+                        { event: '*', schema: 'public', table: 'totem_sabana_signal' },
+                        async () => {
+                            try {
+                                const { data: sab } = await window._sb
+                                    .from('totem_sabana')
+                                    .select('data, archivo_nombre, total_filas, actualizado_en')
+                                    .eq('id', 1).maybeSingle();
+                                if (sab && Array.isArray(sab.data) && sab.data.length > 0) {
+                                    setData(sab.data);
+                                    setAvailableEscuelas([...new Set(sab.data.map(i => i.escuela).filter(Boolean))].sort());
+                                    setAvailableJornadas([...new Set(sab.data.map(i => i.jornada).filter(Boolean))].sort());
+                                    setAvailableSiglas([...new Set(sab.data.map(i => i.seccion).filter(Boolean))].sort());
+                                    safeStorage.setItem('totem_horarios_data', JSON.stringify(sab.data));
+                                    const fechaTxt = sab.actualizado_en ? new Date(sab.actualizado_en).toLocaleString('es-CL') : '';
+                                    if (fechaTxt) safeStorage.setItem('totem_last_updated', fechaTxt);
+                                    if (sab.archivo_nombre) safeStorage.setItem('totem_sabana_nombre', sab.archivo_nombre);
+                                    setSabanaInfo({ status: 'sync', nombre: sab.archivo_nombre || '', fecha: fechaTxt, filas: sab.total_filas || sab.data.length, descargando: false });
+                                }
+                            } catch (e) {}
+                        }
+                    )
+                    .subscribe();
+
+                realtimeChannelsRef.current = [presenceChannel, surveyChannel, sabanaChannel];
 
                 return () => {
                     presenceChannel.unsubscribe();
                     surveyChannel.unsubscribe();
+                    sabanaChannel.unsubscribe();
                 };
             }, [sessionId]);
 
@@ -611,6 +664,82 @@ if (window.supabase) {
                 return limpia === '' || limpia.toLowerCase() === 'sin sala' ? 'Sin recinto' : limpia;
             };
 
+            const arrayBufferToBase64 = (buffer) => {
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const chunk = 0x8000;
+                for (let i = 0; i < bytes.length; i += chunk) {
+                    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+                }
+                return btoa(binary);
+            };
+
+            const base64ToBlob = (base64, mime) => {
+                const byteChars = atob(base64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+                return new Blob([new Uint8Array(byteNumbers)], { type: mime });
+            };
+
+            const subirSabana = async (datos, base64, nombre) => {
+                const ahora = new Date();
+                const fechaTxt = ahora.toLocaleString('es-CL');
+                safeStorage.setItem('totem_horarios_data', JSON.stringify(datos));
+                safeStorage.setItem('totem_last_updated', fechaTxt);
+                safeStorage.setItem('totem_sabana_nombre', nombre);
+                if (!window._sb) {
+                    setSabanaInfo({ status: 'local', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                    return;
+                }
+                setSabanaInfo({ status: 'subiendo', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                try {
+                    const { error } = await window._sb.from('totem_sabana').upsert({
+                        id: 1,
+                        data: datos,
+                        archivo_base64: base64,
+                        archivo_nombre: nombre,
+                        total_filas: datos.length,
+                        actualizado_en: ahora.toISOString()
+                    }, { onConflict: 'id' });
+                    if (error) throw error;
+                    // Señal liviana para que todos los tótems abiertos refresquen al instante
+                    await window._sb.from('totem_sabana_signal').upsert(
+                        { id: 1, version: ahora.toISOString() }, { onConflict: 'id' }
+                    ).then(() => {}, () => {});
+                    logEvento('admin_sabana_sync', { filas: datos.length, archivo: nombre });
+                    setSabanaInfo({ status: 'sync', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                } catch (err) {
+                    console.error('Error subiendo sábana a Supabase:', err);
+                    setSabanaInfo({ status: 'error', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                }
+            };
+
+            const descargarSabana = async () => {
+                setSabanaInfo(p => ({ ...p, descargando: true }));
+                try {
+                    if (!window._sb) throw new Error('sin conexión');
+                    const { data, error } = await window._sb
+                        .from('totem_sabana').select('archivo_base64, archivo_nombre').eq('id', 1).maybeSingle();
+                    if (error || !data || !data.archivo_base64) {
+                        alert('Aún no hay una sábana almacenada en el servidor para descargar. Sube una primero.');
+                        return;
+                    }
+                    const nombre = data.archivo_nombre || 'sabana_planificacion.xlsx';
+                    const blob = base64ToBlob(data.archivo_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url; a.download = nombre;
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 150);
+                    logEvento('admin_sabana_descarga', { archivo: nombre });
+                } catch (err) {
+                    console.error('Error descargando sábana:', err);
+                    alert('No se pudo descargar la sábana. Revisa la conexión e intenta de nuevo.');
+                } finally {
+                    setSabanaInfo(p => ({ ...p, descargando: false }));
+                }
+            };
+
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -624,7 +753,11 @@ if (window.supabase) {
                         const workbook = window.XLSX.read(dataBuffer, { type: 'array', raw: false });
                         const worksheet = workbook.Sheets[workbook.SheetNames[0]];
                         const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-                        processData(json);
+                        const datosValidos = processData(json);
+                        if (datosValidos && datosValidos.length > 0) {
+                            const base64 = arrayBufferToBase64(evt.target.result);
+                            subirSabana(datosValidos, base64, file.name);
+                        }
                     } catch (err) {
                         console.error(err);
                         setError('Error al leer el archivo. Asegúrate de que sea la sábana correcta (.xlsx)');
@@ -634,7 +767,7 @@ if (window.supabase) {
             };
 
             const processData = (rows) => {
-                if (rows.length < 2) { setError('El archivo parece estar vacío.'); return; }
+                if (rows.length < 2) { setError('El archivo parece estar vacío.'); return null; }
                 const dataRows = rows.slice(1);
                 const diasMapa = { 41: 'Lunes', 42: 'Martes', 43: 'Miércoles', 44: 'Jueves', 45: 'Viernes', 46: 'Sábado' };
                 const processed = [];
@@ -659,7 +792,7 @@ if (window.supabase) {
                 });
 
                 const datosValidos = processed.filter(item => item.asignatura && item.horaInicio !== '00:00');
-                if (datosValidos.length === 0) { setError('No se encontraron clases válidas. Verifica la estructura.'); return; }
+                if (datosValidos.length === 0) { setError('No se encontraron clases válidas. Verifica la estructura.'); return null; }
 
                 setData(datosValidos);
                 setAvailableEscuelas([...new Set(datosValidos.map(i => i.escuela).filter(Boolean))].sort());
@@ -669,8 +802,7 @@ if (window.supabase) {
                 setActiveTab('CARTELERA');
                 logEvento('admin_upload_exito', { filas: datosValidos.length });
                 window.__INITIAL_DATA__ = datosValidos;
-                safeStorage.setItem('totem_horarios_data', JSON.stringify(datosValidos));
-                safeStorage.setItem('totem_last_updated', new Date().toLocaleString('es-CL'));
+                return datosValidos;
             };
 
             const getClaseStatus = (clase) => {
@@ -1539,12 +1671,64 @@ if (window.supabase) {
                                         <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-8 lg:p-12 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 text-center relative overflow-hidden">
                                             <Icons.Upload cls="w-16 h-16 lg:w-20 lg:h-20 mx-auto text-duoc-lightblue dark:text-slate-400 mb-4 lg:mb-6" />
                                             <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">Reemplazar Base de Datos</h3>
-                                            <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-10 max-w-2xl mx-auto">Selecciona la Sábana Excel más reciente provista por Coordinación. Este proceso actualizará todas las clases mostradas.</p>
+                                            <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-10 max-w-2xl mx-auto">Selecciona la Sábana Excel más reciente provista por Coordinación. Al subirla se guarda en el servidor y <span className="font-bold text-duoc-blue dark:text-duoc-yellow">se actualiza automáticamente en todos los tótems y dispositivos.</span></p>
                                             <label className="cursor-pointer inline-flex flex-col items-center justify-center border-2 lg:border-4 border-dashed border-blue-200 dark:border-slate-600 bg-blue-50/50 dark:bg-slate-800/50 hover:bg-blue-50 dark:hover:bg-slate-800 transition-colors py-6 px-10 lg:py-10 lg:px-24 rounded-2xl lg:rounded-3xl mx-auto w-full lg:w-auto">
                                                 <span className="text-lg lg:text-2xl font-bold text-duoc-blue dark:text-slate-200 mb-1 lg:mb-2">Seleccionar Archivo .XLSX</span>
                                                 <span className="text-sm lg:text-lg text-slate-400 font-medium">Haz clic aquí para examinar</span>
                                                 <input type="file" accept=".xlsx, .xls, .csv" onChange={handleFileUpload} className="hidden" />
                                             </label>
+
+                                            {sabanaInfo.status === 'subiendo' && (
+                                                <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-duoc-lightblue dark:text-blue-300 animate-pulse">
+                                                    <Icons.Upload cls="w-5 h-5" /> Subiendo al servidor y sincronizando…
+                                                </div>
+                                            )}
+                                            {sabanaInfo.status === 'sync' && (
+                                                <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-green-600 dark:text-green-400">
+                                                    <Icons.Check cls="w-5 h-5" /> Sincronizada en todos los dispositivos
+                                                </div>
+                                            )}
+                                            {sabanaInfo.status === 'error' && (
+                                                <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-red-500 dark:text-red-400">
+                                                    Se guardó localmente, pero falló la subida al servidor. Revisa la conexión y vuelve a subirla.
+                                                </div>
+                                            )}
+                                            {sabanaInfo.status === 'local' && (
+                                                <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-amber-500 dark:text-amber-400">
+                                                    Guardada solo en este dispositivo (sin conexión al servidor).
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* ── Estado de la sábana en el servidor ── */}
+                                        <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-6 lg:p-10 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <div className="flex items-center gap-3 mb-5 lg:mb-6">
+                                                <div className="w-11 h-11 lg:w-14 lg:h-14 bg-duoc-blue/10 dark:bg-duoc-yellow/15 text-duoc-blue dark:text-duoc-yellow rounded-full flex items-center justify-center shrink-0"><Icons.Clock cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
+                                                <div>
+                                                    <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white">Sábana activa</h3>
+                                                    <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-medium">Documento vigente que ven todos los dispositivos</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col sm:flex-row sm:items-end gap-4 sm:justify-between">
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 lg:gap-4 flex-1">
+                                                    <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3">
+                                                        <div className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wide">Última carga</div>
+                                                        <div className="text-base lg:text-lg font-bold text-duoc-blue dark:text-white">{sabanaInfo.fecha || 'Sin registro'}</div>
+                                                    </div>
+                                                    <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3">
+                                                        <div className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wide">Archivo</div>
+                                                        <div className="text-base lg:text-lg font-bold text-duoc-blue dark:text-white truncate" title={sabanaInfo.nombre}>{sabanaInfo.nombre || '—'}</div>
+                                                    </div>
+                                                    <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3">
+                                                        <div className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wide">Clases cargadas</div>
+                                                        <div className="text-base lg:text-lg font-bold text-duoc-blue dark:text-white">{sabanaInfo.filas ? sabanaInfo.filas.toLocaleString('es-CL') : (data.length ? data.length.toLocaleString('es-CL') : '—')}</div>
+                                                    </div>
+                                                </div>
+                                                <button onClick={descargarSabana} disabled={sabanaInfo.descargando} className="shrink-0 w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl font-black text-base lg:text-lg hover:opacity-90 transition-opacity shadow-md disabled:opacity-50">
+                                                    <Icons.Download cls="w-5 h-5" /> {sabanaInfo.descargando ? 'Descargando…' : 'Descargar sábana'}
+                                                </button>
+                                            </div>
+                                            <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 mt-4">Descarga el mismo archivo Excel que está almacenado en el servidor.</p>
                                         </div>
 
                                         {/* ── Cambiar contraseña de administrador ── */}
