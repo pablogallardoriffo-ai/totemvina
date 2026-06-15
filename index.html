@@ -82,7 +82,10 @@ if (window.supabase) {
             Message: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
             Mail: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>,
             Building: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg>,
-            QrCode: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>
+            QrCode: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>,
+            GraduationCap: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>,
+            CalendarDays: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>,
+            Trash2: ({cls}) => <svg className={cls} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
         };
 
         const QRCodeDisplay = ({ url }) => {
@@ -224,6 +227,11 @@ if (window.supabase) {
             const [adminPin, setAdminPin] = useState('010203');
             const [pinChange, setPinChange] = useState({ current: '', next: '', confirm: '', status: 'idle', msg: '' });
             const [sabanaInfo, setSabanaInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
+            const [examenes, setExamenes] = useState([]);
+            const [examenesInfo, setExamenesInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
+            const [cartelView, setCartelView] = useState('HORARIOS');
+            const [examenSearch, setExamenSearch] = useState('');
+            const [examenFechaFilter, setExamenFechaFilter] = useState('');
 
             const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
             const todayName = diasSemana[filterTime.getDay()];
@@ -527,15 +535,33 @@ if (window.supabase) {
                                 safeStorage.setItem('totem_admin_pin', cfg.value);
                             }
                         } catch(e) {}
+                        // Cargar exámenes desde el servidor
+                        try {
+                            const { data: exRow } = await window._sb
+                                .from('totem_examenes').select('data, archivo_nombre, total_filas, actualizado_en')
+                                .eq('id', 1).maybeSingle();
+                            if (exRow && Array.isArray(exRow.data) && exRow.data.length > 0) {
+                                setExamenes(exRow.data);
+                                safeStorage.setItem('totem_examenes_data', JSON.stringify(exRow.data));
+                                const fTxt = exRow.actualizado_en ? new Date(exRow.actualizado_en).toLocaleString('es-CL') : '';
+                                if (fTxt) safeStorage.setItem('totem_examenes_updated', fTxt);
+                                if (exRow.archivo_nombre) safeStorage.setItem('totem_examenes_nombre', exRow.archivo_nombre);
+                                setExamenesInfo({ status: 'sync', nombre: exRow.archivo_nombre || '', fecha: fTxt, filas: exRow.total_filas || exRow.data.length, descargando: false });
+                            }
+                        } catch(e) {}
                     } else {
                         const cached = safeStorage.getItem('totem_horarios_data');
                         if (cached) { try { const d = JSON.parse(cached); if (d.length) applyData(d); } catch(e) {} }
                         const cachedSurveys = safeStorage.getItem('totem_surveys_data');
                         if (cachedSurveys) { try { setSurveys(JSON.parse(cachedSurveys)); } catch(e) {} }
+                        const cachedEx = safeStorage.getItem('totem_examenes_data');
+                        if (cachedEx) { try { const ex = JSON.parse(cachedEx); if (ex.length) setExamenes(ex); } catch(e) {} }
                     }
                     // Restaurar info de última carga (para el panel) si aún no se obtuvo del servidor
                     const lastUp = safeStorage.getItem('totem_last_updated');
                     if (lastUp) setSabanaInfo(prev => prev.fecha ? prev : { ...prev, fecha: lastUp, nombre: safeStorage.getItem('totem_sabana_nombre') || prev.nombre });
+                    const lastExUp = safeStorage.getItem('totem_examenes_updated');
+                    if (lastExUp) setExamenesInfo(prev => prev.fecha ? prev : { ...prev, fecha: lastExUp, nombre: safeStorage.getItem('totem_examenes_nombre') || prev.nombre });
                     cargarAnaliticas();
                     setIsConnecting(false);
                 };
@@ -626,12 +652,38 @@ if (window.supabase) {
                     )
                     .subscribe();
 
-                realtimeChannelsRef.current = [presenceChannel, surveyChannel, sabanaChannel];
+                // Realtime: nuevos exámenes subidos → refrescar en todos los tótems
+                const examenesChannel = window._sb
+                    .channel('totem_examenes_rt')
+                    .on('postgres_changes',
+                        { event: '*', schema: 'public', table: 'totem_examenes_signal' },
+                        async () => {
+                            try {
+                                const { data: exRow } = await window._sb
+                                    .from('totem_examenes').select('data, archivo_nombre, total_filas, actualizado_en')
+                                    .eq('id', 1).maybeSingle();
+                                if (exRow && Array.isArray(exRow.data) && exRow.data.length > 0) {
+                                    setExamenes(exRow.data);
+                                    safeStorage.setItem('totem_examenes_data', JSON.stringify(exRow.data));
+                                    const fTxt = exRow.actualizado_en ? new Date(exRow.actualizado_en).toLocaleString('es-CL') : '';
+                                    if (fTxt) safeStorage.setItem('totem_examenes_updated', fTxt);
+                                    if (exRow.archivo_nombre) safeStorage.setItem('totem_examenes_nombre', exRow.archivo_nombre);
+                                    setExamenesInfo({ status: 'sync', nombre: exRow.archivo_nombre || '', fecha: fTxt, filas: exRow.total_filas || exRow.data.length, descargando: false });
+                                } else {
+                                    setExamenes([]);
+                                    setExamenesInfo({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
+                                }
+                            } catch(e) {}
+                        }
+                    ).subscribe();
+
+                realtimeChannelsRef.current = [presenceChannel, surveyChannel, sabanaChannel, examenesChannel];
 
                 return () => {
                     presenceChannel.unsubscribe();
                     surveyChannel.unsubscribe();
                     sabanaChannel.unsubscribe();
+                    examenesChannel.unsubscribe();
                 };
             }, [sessionId]);
 
@@ -738,6 +790,117 @@ if (window.supabase) {
                 } finally {
                     setSabanaInfo(p => ({ ...p, descargando: false }));
                 }
+            };
+
+            const processExamenes = (rows) => {
+                if (rows.length < 2) return null;
+                const rawHeaders = rows[0];
+                const headers = rawHeaders.map((h, _i) => String(h || '').trim()
+                    .toLowerCase()
+                    .replace(/\s+/g, '_')
+                    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n')
+                    .replace(/[^a-z0-9_]/g, '') || `col${_i}`
+                );
+                const originalHeaders = rawHeaders.map(h => String(h || '').trim());
+                const exams = [];
+                rows.slice(1).forEach(row => {
+                    const obj = {};
+                    let hasValue = false;
+                    headers.forEach((h, i) => {
+                        const val = String(row[i] !== undefined ? row[i] : '').trim();
+                        if (h && val !== '') { obj[h] = val; obj[`_label_${h}`] = originalHeaders[i]; hasValue = true; }
+                    });
+                    if (hasValue) exams.push(obj);
+                });
+                return exams.length ? exams : null;
+            };
+
+            const subirExamenes = async (datos, base64, nombre) => {
+                const ahora = new Date();
+                const fechaTxt = ahora.toLocaleString('es-CL');
+                safeStorage.setItem('totem_examenes_data', JSON.stringify(datos));
+                safeStorage.setItem('totem_examenes_updated', fechaTxt);
+                safeStorage.setItem('totem_examenes_nombre', nombre);
+                if (!window._sb) {
+                    setExamenesInfo({ status: 'local', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                    return;
+                }
+                setExamenesInfo({ status: 'subiendo', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                try {
+                    const { error } = await window._sb.from('totem_examenes').upsert({
+                        id: 1, data: datos, archivo_base64: base64, archivo_nombre: nombre,
+                        total_filas: datos.length, actualizado_en: ahora.toISOString()
+                    }, { onConflict: 'id' });
+                    if (error) throw error;
+                    await window._sb.from('totem_examenes_signal').upsert(
+                        { id: 1, version: ahora.toISOString() }, { onConflict: 'id' }
+                    ).then(() => {}, () => {});
+                    logEvento('admin_examenes_sync', { filas: datos.length, archivo: nombre });
+                    setExamenesInfo({ status: 'sync', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                } catch(err) {
+                    console.error('Error subiendo exámenes:', err);
+                    setExamenesInfo({ status: 'error', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                }
+            };
+
+            const descargarExamenes = async () => {
+                setExamenesInfo(p => ({ ...p, descargando: true }));
+                try {
+                    if (!window._sb) throw new Error('sin conexión');
+                    const { data, error } = await window._sb
+                        .from('totem_examenes').select('archivo_base64, archivo_nombre').eq('id', 1).maybeSingle();
+                    if (error || !data || !data.archivo_base64) {
+                        alert('Aún no hay un archivo de exámenes almacenado. Sube uno primero.'); return;
+                    }
+                    const nombre = data.archivo_nombre || 'examenes.xlsx';
+                    const blob = base64ToBlob(data.archivo_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a'); a.href = url; a.download = nombre;
+                    document.body.appendChild(a); a.click(); a.remove();
+                    setTimeout(() => URL.revokeObjectURL(url), 150);
+                    logEvento('admin_examenes_descarga', { archivo: nombre });
+                } catch(err) {
+                    alert('No se pudo descargar. Revisa la conexión e intenta de nuevo.');
+                } finally {
+                    setExamenesInfo(p => ({ ...p, descargando: false }));
+                }
+            };
+
+            const eliminarExamenes = async () => {
+                if (!confirm('¿Eliminar todos los exámenes del servidor? Esta acción no se puede deshacer.')) return;
+                try {
+                    if (window._sb) {
+                        await window._sb.from('totem_examenes').delete().eq('id', 1);
+                        await window._sb.from('totem_examenes_signal').upsert({ id: 1, version: new Date().toISOString() }, { onConflict: 'id' }).then(() => {}, () => {});
+                    }
+                    setExamenes([]);
+                    setExamenesInfo({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
+                    safeStorage.setItem('totem_examenes_data', '[]');
+                    logEvento('admin_examenes_eliminar');
+                } catch(e) { alert('Error al eliminar. Revisa la conexión.'); }
+            };
+
+            const handleExamenesUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                logEvento('admin_examenes_inicio', { archivo: file.name });
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const dataBuffer = new Uint8Array(evt.target.result);
+                        const workbook = window.XLSX.read(dataBuffer, { type: 'array', raw: false });
+                        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const json = window.XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+                        const exams = processExamenes(json);
+                        if (exams) {
+                            setExamenes(exams);
+                            subirExamenes(exams, arrayBufferToBase64(evt.target.result), file.name);
+                        } else {
+                            alert('No se encontraron filas válidas. Asegúrate de que la primera fila sea el encabezado.');
+                        }
+                    } catch(err) { console.error(err); alert('Error al leer el archivo. Asegúrate de que sea un Excel válido (.xlsx).'); }
+                };
+                reader.readAsArrayBuffer(file);
             };
 
             const handleFileUpload = (e) => {
@@ -1242,6 +1405,29 @@ if (window.supabase) {
                     {/* VISTA: CARTELERA (PÚBLICA) */}
                     {activeTab === 'CARTELERA' && (
                         <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
+
+                            {/* ── TOGGLE: Horarios / Exámenes ── */}
+                            <div className="shrink-0 flex bg-duoc-blue dark:bg-[#001a38] px-4 lg:px-8 gap-1 pt-2">
+                                <button
+                                    onClick={() => { setCartelView('HORARIOS'); trackAction('buttons'); }}
+                                    className={`flex items-center gap-2 px-5 py-2.5 lg:px-8 lg:py-3 font-black text-sm lg:text-lg rounded-t-xl transition-all ${cartelView === 'HORARIOS' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-md' : 'text-white/70 dark:text-slate-400 hover:text-white hover:bg-white/10'}`}
+                                >
+                                    <Icons.LayoutList cls="w-4 h-4 lg:w-5 lg:h-5" /> Horarios
+                                </button>
+                                <button
+                                    onClick={() => { setCartelView('EXAMENES'); trackAction('buttons'); logEvento('examenes_ver'); }}
+                                    className={`flex items-center gap-2 px-5 py-2.5 lg:px-8 lg:py-3 font-black text-sm lg:text-lg rounded-t-xl transition-all ${cartelView === 'EXAMENES' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-md' : 'text-white/70 dark:text-slate-400 hover:text-white hover:bg-white/10'}`}
+                                >
+                                    <Icons.GraduationCap cls="w-4 h-4 lg:w-5 lg:h-5" /> Exámenes
+                                    {examenes.length > 0 && cartelView !== 'EXAMENES' && (
+                                        <span className="bg-duoc-yellow text-duoc-blue text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none">{examenes.length}</span>
+                                    )}
+                                </button>
+                            </div>
+
+                            {/* ── VISTA: HORARIOS ── */}
+                            {cartelView === 'HORARIOS' && <>
+
                             {/* FILTROS Y ACCIONES PÚBLICAS */}
                             <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col lg:flex-row gap-3 shadow-sm z-0 items-stretch lg:items-center overflow-x-auto transition-colors duration-300 custom-scrollbar">
                                 
@@ -1463,6 +1649,136 @@ if (window.supabase) {
                                     </div>
                                 </div>
                             </main>
+
+                            {/* FIN VISTA HORARIOS */}
+                            </>}
+
+                            {/* ── VISTA: EXÁMENES ── */}
+                            {cartelView === 'EXAMENES' && (
+                                <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
+                                    {/* Barra de búsqueda y filtros de exámenes */}
+                                    <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col sm:flex-row gap-3 shadow-sm transition-colors duration-300">
+                                        <div className="relative flex-1">
+                                            <Icons.Search cls="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 lg:w-6 lg:h-6 text-slate-400 dark:text-slate-500" />
+                                            <input
+                                                type="text"
+                                                placeholder="Buscar por asignatura, docente, sala, sección…"
+                                                value={examenSearch}
+                                                onChange={e => { setExamenSearch(e.target.value); trackAction('filters'); }}
+                                                className="w-full text-base lg:text-lg py-2.5 lg:py-3 pl-12 pr-8 bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow dark:focus:border-duoc-yellow transition-all font-semibold text-slate-800 dark:text-slate-200 placeholder:font-normal dark:placeholder:text-slate-500"
+                                            />
+                                            {examenSearch && <button onClick={() => setExamenSearch('')} className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-200 dark:bg-slate-700 rounded-full p-1 text-slate-500 hover:bg-slate-300"><Icons.X cls="w-4 h-4" /></button>}
+                                        </div>
+                                        {(() => {
+                                            const fechas = [...new Set(examenes.map(e => e.fecha || e.fecha_examen || e.fecha_de_examen || e.date || '').filter(Boolean))].sort();
+                                            return fechas.length > 0 ? (
+                                                <select value={examenFechaFilter} onChange={e => { setExamenFechaFilter(e.target.value); trackAction('filters'); }} className="min-w-[160px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-lg font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer transition-colors">
+                                                    <option value="">Todas las fechas</option>
+                                                    {fechas.map(f => <option key={f} value={f}>{f}</option>)}
+                                                </select>
+                                            ) : null;
+                                        })()}
+                                    </div>
+
+                                    {/* Lista de exámenes */}
+                                    <main className="flex-1 flex flex-col p-3 lg:p-6 overflow-hidden">
+                                        {examenes.length === 0 ? (
+                                            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-4">
+                                                <Icons.GraduationCap cls="w-20 h-20 lg:w-28 lg:h-28 text-slate-200 dark:text-slate-700" />
+                                                <h3 className="text-2xl lg:text-3xl font-black text-slate-400 dark:text-slate-500">Sin exámenes cargados</h3>
+                                                <p className="text-base lg:text-xl text-slate-400 dark:text-slate-500 max-w-md">El administrador aún no ha subido la base de datos de exámenes. Consulta en secretaría.</p>
+                                            </div>
+                                        ) : (() => {
+                                            const term = examenSearch.toLowerCase();
+                                            const filtered = examenes.filter(ex => {
+                                                const vals = Object.entries(ex).filter(([k]) => !k.startsWith('_label_')).map(([,v]) => v.toLowerCase()).join(' ');
+                                                const passSearch = !term || vals.includes(term);
+                                                const fechaKey = Object.keys(ex).find(k => k === 'fecha' || k === 'fecha_examen' || k === 'fecha_de_examen' || k === 'date' || k.includes('fecha'));
+                                                const passDate = !examenFechaFilter || (fechaKey && ex[fechaKey] === examenFechaFilter);
+                                                return passSearch && passDate;
+                                            });
+                                            const KNOWN = { asignatura:true, ramo:true, nombre:true, nombre_asignatura:true, seccion:true, sigla:true, codigo:true, seccion_id:true, docente:true, profesor:true, sala:true, recinto:true, sala_examen:true, escuela:true, carrera:true, programa:true, jornada:true, fecha:true, fecha_examen:true, fecha_de_examen:true, date:true, hora:true, hora_inicio:true, horaInicio:true, hora_inicio_examen:true, hora_fin:true, horaFin:true, hora_fin_examen:true, alumnos:true, inscritos:true, matriculados:true };
+                                            const getF = (ex, ...keys) => { for (const k of keys) if (ex[k]) return ex[k]; return ''; };
+                                            return filtered.length === 0 ? (
+                                                <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-3">
+                                                    <Icons.Search cls="w-14 h-14 text-slate-200 dark:text-slate-700" />
+                                                    <p className="text-lg font-bold text-slate-400 dark:text-slate-500">Sin resultados para "{examenSearch || examenFechaFilter}"</p>
+                                                </div>
+                                            ) : (
+                                                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                                    <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold mb-3 lg:mb-4">{filtered.length} examen{filtered.length !== 1 ? 'es' : ''} encontrado{filtered.length !== 1 ? 's' : ''}</p>
+                                                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 lg:gap-4 pb-4">
+                                                        {filtered.map((ex, idx) => {
+                                                            const asig = getF(ex, 'asignatura', 'ramo', 'nombre', 'nombre_asignatura');
+                                                            const sec = getF(ex, 'seccion', 'sigla', 'codigo', 'seccion_id');
+                                                            const doc = getF(ex, 'docente', 'profesor');
+                                                            const sala = getF(ex, 'sala', 'recinto', 'sala_examen');
+                                                            const fecha = getF(ex, 'fecha', 'fecha_examen', 'fecha_de_examen', 'date');
+                                                            const horaI = getF(ex, 'hora_inicio', 'horaInicio', 'hora_inicio_examen', 'hora');
+                                                            const horaF = getF(ex, 'hora_fin', 'horaFin', 'hora_fin_examen');
+                                                            const escuela = getF(ex, 'escuela', 'carrera', 'programa');
+                                                            const alumnos = getF(ex, 'alumnos', 'inscritos', 'matriculados');
+                                                            const extras = Object.entries(ex).filter(([k]) => !k.startsWith('_label_') && !KNOWN[k] && ex[k]);
+                                                            return (
+                                                                <div key={idx} className="bg-white dark:bg-duoc-card rounded-xl lg:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                                                                    {/* Header amarillo */}
+                                                                    <div className="bg-duoc-yellow/10 dark:bg-duoc-yellow/10 border-b border-duoc-yellow/30 px-4 py-3 lg:px-5 lg:py-4 flex items-start justify-between gap-3">
+                                                                        <div className="min-w-0">
+                                                                            <div className="text-base lg:text-xl font-black text-duoc-blue dark:text-white leading-tight">{asig || '(Sin asignatura)'}</div>
+                                                                            {sec && <span className="inline-block mt-1 text-xs lg:text-sm font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-md">{sec}</span>}
+                                                                        </div>
+                                                                        {sala && (
+                                                                            <div className="shrink-0 bg-duoc-lightblue dark:bg-slate-800 text-white dark:text-duoc-yellow px-3 py-1.5 rounded-xl text-sm lg:text-base font-black shadow-sm border dark:border-slate-700 whitespace-nowrap">{sala}</div>
+                                                                        )}
+                                                                    </div>
+                                                                    {/* Body */}
+                                                                    <div className="px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-2">
+                                                                        {(fecha || horaI) && (
+                                                                            <div className="flex items-center gap-2 text-sm lg:text-base font-bold text-slate-700 dark:text-slate-300">
+                                                                                <Icons.CalendarDays cls="w-4 h-4 text-duoc-yellow shrink-0" />
+                                                                                <span>{[fecha, horaI && horaF ? `${horaI} – ${horaF}` : horaI].filter(Boolean).join(' · ')}</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {doc && (
+                                                                            <div className="flex items-center gap-2 text-sm lg:text-base text-slate-600 dark:text-slate-400 font-semibold">
+                                                                                <Icons.Users cls="w-4 h-4 text-slate-400 shrink-0" />
+                                                                                <span>{doc}</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {escuela && (
+                                                                            <div className="flex items-center gap-2 text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold">
+                                                                                <Icons.Building cls="w-4 h-4 shrink-0" />
+                                                                                <span>{escuela}</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {alumnos && (
+                                                                            <div className="flex items-center gap-2 text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold">
+                                                                                <Icons.Users cls="w-3.5 h-3.5 shrink-0" />
+                                                                                <span>{alumnos} inscritos</span>
+                                                                            </div>
+                                                                        )}
+                                                                        {extras.length > 0 && (
+                                                                            <div className="mt-1 flex flex-wrap gap-1.5">
+                                                                                {extras.map(([k, v]) => (
+                                                                                    <span key={k} className="inline-flex items-baseline gap-1 text-[11px] lg:text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1">
+                                                                                        <span className="font-bold text-slate-400 dark:text-slate-500">{(ex[`_label_${k}`] || k).replace(/_/g,' ')}:</span>
+                                                                                        <span className="font-semibold text-slate-600 dark:text-slate-300">{v}</span>
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                    </main>
+                                </div>
+                            )}
+
                         </div>
                     )}
 
@@ -1729,6 +2045,72 @@ if (window.supabase) {
                                                 </button>
                                             </div>
                                             <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 mt-4">Descarga el mismo archivo Excel que está almacenado en el servidor.</p>
+                                        </div>
+
+                                        {/* ── Base de Datos de Exámenes ── */}
+                                        <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-8 lg:p-10 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 text-center relative overflow-hidden">
+                                            <Icons.GraduationCap cls="w-16 h-16 lg:w-20 lg:h-20 mx-auto text-duoc-yellow dark:text-duoc-yellow mb-4 lg:mb-6" />
+                                            <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">Base de Datos de Exámenes</h3>
+                                            <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-8 max-w-2xl mx-auto">Carga el Excel de programación de exámenes. La primera fila debe contener los encabezados. Al subirlo, <span className="font-bold text-duoc-blue dark:text-duoc-yellow">se muestra a todos los estudiantes en el tótem automáticamente.</span></p>
+                                            <label className="cursor-pointer inline-flex flex-col items-center justify-center border-2 lg:border-4 border-dashed border-yellow-200 dark:border-slate-600 bg-yellow-50/50 dark:bg-slate-800/50 hover:bg-yellow-50 dark:hover:bg-slate-800 transition-colors py-6 px-10 lg:py-10 lg:px-24 rounded-2xl lg:rounded-3xl mx-auto w-full lg:w-auto">
+                                                <span className="text-lg lg:text-2xl font-bold text-duoc-blue dark:text-slate-200 mb-1 lg:mb-2">Seleccionar Archivo .XLSX</span>
+                                                <span className="text-sm lg:text-lg text-slate-400 font-medium">Primera fila = encabezados (Asignatura, Fecha, Hora, Sala…)</span>
+                                                <input type="file" accept=".xlsx, .xls, .csv" onChange={handleExamenesUpload} className="hidden" />
+                                            </label>
+                                            {examenesInfo.status === 'subiendo' && (
+                                                <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-duoc-lightblue dark:text-blue-300 animate-pulse">
+                                                    <Icons.Upload cls="w-5 h-5" /> Subiendo al servidor y sincronizando…
+                                                </div>
+                                            )}
+                                            {examenesInfo.status === 'sync' && (
+                                                <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-green-600 dark:text-green-400">
+                                                    <Icons.Check cls="w-5 h-5" /> Sincronizado · visible para todos los estudiantes
+                                                </div>
+                                            )}
+                                            {examenesInfo.status === 'error' && (
+                                                <div className="mt-6 text-base lg:text-lg font-bold text-red-500 dark:text-red-400">
+                                                    Se guardó localmente, pero falló la subida al servidor. Revisa la conexión.
+                                                </div>
+                                            )}
+                                            {examenesInfo.status === 'local' && (
+                                                <div className="mt-6 text-base lg:text-lg font-bold text-amber-500 dark:text-amber-400">
+                                                    Guardado solo en este dispositivo (sin conexión al servidor).
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* ── Estado exámenes en el servidor ── */}
+                                        <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-6 lg:p-10 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <div className="flex items-center gap-3 mb-5 lg:mb-6">
+                                                <div className="w-11 h-11 lg:w-14 lg:h-14 bg-duoc-yellow/15 text-duoc-yellow dark:text-duoc-yellow rounded-full flex items-center justify-center shrink-0"><Icons.CalendarDays cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
+                                                <div>
+                                                    <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white">Exámenes activos</h3>
+                                                    <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-medium">Archivo vigente que ven los estudiantes en el tótem</p>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 lg:gap-4 mb-5">
+                                                <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3">
+                                                    <div className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wide">Última carga</div>
+                                                    <div className="text-base lg:text-lg font-bold text-duoc-blue dark:text-white">{examenesInfo.fecha || 'Sin registro'}</div>
+                                                </div>
+                                                <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3">
+                                                    <div className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wide">Archivo</div>
+                                                    <div className="text-base lg:text-lg font-bold text-duoc-blue dark:text-white truncate" title={examenesInfo.nombre}>{examenesInfo.nombre || '—'}</div>
+                                                </div>
+                                                <div className="bg-slate-50 dark:bg-slate-800 rounded-xl px-4 py-3">
+                                                    <div className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-semibold uppercase tracking-wide">Exámenes cargados</div>
+                                                    <div className="text-base lg:text-lg font-bold text-duoc-blue dark:text-white">{examenesInfo.filas ? examenesInfo.filas.toLocaleString('es-CL') : (examenes.length ? examenes.length.toLocaleString('es-CL') : '—')}</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col sm:flex-row gap-3">
+                                                <button onClick={descargarExamenes} disabled={examenesInfo.descargando || !examenesInfo.fecha} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl font-black text-base lg:text-lg hover:opacity-90 transition-opacity shadow-md disabled:opacity-40">
+                                                    <Icons.Download cls="w-5 h-5" /> {examenesInfo.descargando ? 'Descargando…' : 'Descargar archivo'}
+                                                </button>
+                                                <button onClick={eliminarExamenes} disabled={!examenesInfo.fecha && !examenes.length} className="flex items-center justify-center gap-2 px-6 py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-xl font-black text-base lg:text-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors disabled:opacity-40">
+                                                    <Icons.Trash2 cls="w-5 h-5" /> Eliminar exámenes
+                                                </button>
+                                            </div>
+                                            <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 mt-4">Para reemplazar, sube un nuevo archivo arriba. Para quitar la vista de exámenes del tótem, usa "Eliminar exámenes".</p>
                                         </div>
 
                                         {/* ── Cambiar contraseña de administrador ── */}
