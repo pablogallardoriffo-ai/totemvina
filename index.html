@@ -998,6 +998,65 @@ if (window.supabase) {
                 }
             };
 
+            // Convierte una fecha de examen (texto o serial Excel) a objeto Date a medianoche
+            const parseExamenFecha = (raw) => {
+                if (raw == null || raw === '') return null;
+                const s = String(raw).trim();
+                // Serial de Excel (ej: 46192)
+                if (/^\d{5}(\.\d+)?$/.test(s)) {
+                    const ms = (parseFloat(s) - 25569) * 86400000;
+                    const d = new Date(ms);
+                    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+                }
+                // ISO: yyyy-mm-dd
+                let m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);
+                if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+                // dd-mm-yyyy / dd/mm/yyyy
+                m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})/);
+                if (m) { let yr = +m[3]; if (yr < 100) yr += 2000; return new Date(yr, +m[2] - 1, +m[1]); }
+                return null;
+            };
+
+            // Estado del examen leído igual que una clase de la sábana (en curso / por realizar / realizado)
+            const getExamenStatus = (ex) => {
+                const fechaStr = ex.fecha || ex.fecha_examen || ex.fecha_de_examen || ex.date || '';
+                const fecha = parseExamenFecha(fechaStr);
+                if (!fecha) return null;
+                const hoy = new Date(filterTime.getFullYear(), filterTime.getMonth(), filterTime.getDate());
+                const diffDias = Math.round((fecha - hoy) / 86400000);
+
+                if (diffDias > 0) {
+                    if (diffDias === 1) return { texto: 'MAÑANA', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: false };
+                    return { texto: 'PROGRAMADO', desc: `en ${diffDias} días`, bg: 'bg-slate-200 dark:bg-slate-800', text: 'text-slate-600 dark:text-slate-400', border: 'border-slate-300 dark:border-slate-700', isImportant: false };
+                }
+                if (diffDias < 0) {
+                    return { texto: 'REALIZADO', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-500', border: 'border-slate-200 dark:border-slate-700', isImportant: false };
+                }
+
+                // Es hoy → usar el horario igual que getClaseStatus
+                const horaIstr = formatExcelTime(ex.hora_inicio || ex.horainicio || ex.hora_inicio_examen || ex.hora || '');
+                const horaFstr = formatExcelTime(ex.hora_fin || ex.horafin || ex.hora_fin_examen || '');
+                const [sh, sm] = horaIstr.split(':').map(Number);
+                let [eh, em] = horaFstr.split(':').map(Number);
+                const currentMins = filterTime.getHours() * 60 + filterTime.getMinutes();
+                const startMins = (sh * 60) + (sm || 0);
+                let endMins = (eh * 60) + (em || 0);
+                if (isNaN(startMins) || startMins === 0) return { texto: 'HOY', bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
+                if (isNaN(endMins) || endMins <= startMins) endMins = startMins + 120; // duración por defecto 2 h
+
+                const diffStart = startMins - currentMins;
+                const diffEnd = endMins - currentMins;
+                if (currentMins < startMins) {
+                    if (diffStart <= 30) return { texto: '¡POR EMPEZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
+                    return { texto: 'HOY · POR REALIZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: true };
+                } else if (currentMins >= endMins) {
+                    return { texto: 'REALIZADO', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-500', border: 'border-slate-200 dark:border-slate-700', isImportant: false };
+                } else {
+                    if (diffEnd <= 30 && diffEnd > 0) return { texto: '¡POR FINALIZAR!', desc: `quedan ${diffEnd} min`, bg: 'bg-blue-100 dark:bg-duoc-lightblue/30', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-duoc-lightblue', isImportant: true };
+                    return { texto: 'EN CURSO', bg: 'bg-green-100 dark:bg-green-900/40', text: 'text-green-700 dark:text-green-400', border: 'border-green-500 dark:border-green-600 shadow-[0_0_15px_rgba(34,197,94,0.3)]', isImportant: true };
+                }
+            };
+
             const sortedFilteredData = useMemo(() => {
                 const filtered = data.filter(item => {
                     const statusInfo = getClaseStatus(item);
@@ -1696,6 +1755,15 @@ if (window.supabase) {
                                                 const fechaKey = Object.keys(ex).find(k => k === 'fecha' || k === 'fecha_examen' || k === 'fecha_de_examen' || k === 'date' || k.includes('fecha'));
                                                 const passDate = !examenFechaFilter || (fechaKey && ex[fechaKey] === examenFechaFilter);
                                                 return passSearch && passDate;
+                                            }).sort((a, b) => {
+                                                const fa = parseExamenFecha(a.fecha || a.fecha_examen || a.fecha_de_examen || a.date || '');
+                                                const fb = parseExamenFecha(b.fecha || b.fecha_examen || b.fecha_de_examen || b.date || '');
+                                                if (fa && fb && fa - fb !== 0) return fa - fb;
+                                                if (fa && !fb) return -1;
+                                                if (!fa && fb) return 1;
+                                                const ha = formatExcelTime(a.hora_inicio || a.horainicio || a.hora || '');
+                                                const hb = formatExcelTime(b.hora_inicio || b.horainicio || b.hora || '');
+                                                return ha.localeCompare(hb);
                                             });
                                             const KNOWN = { asignatura:true, ramo:true, nombre:true, nombre_asignatura:true, seccion:true, sigla:true, codigo:true, seccion_id:true, docente:true, profesor:true, sala:true, recinto:true, sala_examen:true, escuela:true, carrera:true, programa:true, jornada:true, fecha:true, fecha_examen:true, fecha_de_examen:true, date:true, hora:true, hora_inicio:true, horaInicio:true, hora_inicio_examen:true, hora_fin:true, horaFin:true, hora_fin_examen:true, alumnos:true, inscritos:true, matriculados:true };
                                             const getF = (ex, ...keys) => { for (const k of keys) if (ex[k]) return ex[k]; return ''; };
@@ -1718,9 +1786,10 @@ if (window.supabase) {
                                                             const horaF = getF(ex, 'hora_fin', 'horaFin', 'hora_fin_examen');
                                                             const escuela = getF(ex, 'escuela', 'carrera', 'programa');
                                                             const alumnos = getF(ex, 'alumnos', 'inscritos', 'matriculados');
+                                                            const estado = getExamenStatus(ex);
                                                             const extras = Object.entries(ex).filter(([k]) => !k.startsWith('_label_') && !KNOWN[k] && ex[k]);
                                                             return (
-                                                                <div key={idx} className="bg-white dark:bg-duoc-card rounded-xl lg:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                                                                <div key={idx} className={`bg-white dark:bg-duoc-card rounded-xl lg:rounded-2xl border-2 shadow-sm overflow-hidden hover:shadow-md transition-shadow ${estado ? estado.border : 'border-slate-200 dark:border-slate-700'}`}>
                                                                     {/* Header amarillo */}
                                                                     <div className="bg-duoc-yellow/10 dark:bg-duoc-yellow/10 border-b border-duoc-yellow/30 px-4 py-3 lg:px-5 lg:py-4 flex items-start justify-between gap-3">
                                                                         <div className="min-w-0">
@@ -1731,6 +1800,14 @@ if (window.supabase) {
                                                                             <div className="shrink-0 bg-duoc-lightblue dark:bg-slate-800 text-white dark:text-duoc-yellow px-3 py-1.5 rounded-xl text-sm lg:text-base font-black shadow-sm border dark:border-slate-700 whitespace-nowrap">{sala}</div>
                                                                         )}
                                                                     </div>
+                                                                    {/* Estado (leído igual que la sábana) */}
+                                                                    {estado && (
+                                                                        <div className={`px-4 lg:px-5 py-2 flex items-center gap-2 text-xs lg:text-sm font-black border-b ${estado.bg} ${estado.text} ${estado.border}`}>
+                                                                            {estado.isImportant && <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span>}
+                                                                            {estado.texto}
+                                                                            {estado.desc && <span className="font-bold opacity-80">· {estado.desc}</span>}
+                                                                        </div>
+                                                                    )}
                                                                     {/* Body */}
                                                                     <div className="px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-2">
                                                                         {(fecha || horaI) && (
