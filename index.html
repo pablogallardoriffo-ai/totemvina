@@ -126,7 +126,7 @@ if (window.supabase) {
             return <div ref={qrRef} className="flex justify-center p-4 bg-white rounded-2xl shadow-md inline-block border-4 border-slate-100"></div>;
         };
 
-        const ClockHeader = ({ isDarkMode, setIsDarkMode, trackAction }) => {
+        const ClockHeader = ({ isDarkMode, setIsDarkMode, trackAction, titulo }) => {
             const [clockTime, setClockTime] = useState(new Date());
             useEffect(() => {
                 const timer = setInterval(() => setClockTime(new Date()), 1000);
@@ -176,7 +176,7 @@ if (window.supabase) {
                         </div>
                         <div className="flex flex-col justify-center text-left">
                             <span className="text-[1.05rem] font-bold tracking-widest uppercase leading-none mb-2 text-duoc-yellow">
-                                COORDINACIÓN DOCENTE
+                                {titulo || 'COORDINACIÓN DOCENTE'}
                             </span>
                             <span className={`text-[1.8rem] tracking-wide leading-none text-white`}>
                                 <span className="font-black">¡Hola!</span> <span className="font-medium opacity-95">Encuentra tu clase de hoy.</span>
@@ -249,7 +249,13 @@ if (window.supabase) {
             const [sabanaInfo, setSabanaInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
             const [examenes, setExamenes] = useState([]);
             const [examenesInfo, setExamenesInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
-            const [cartelView, setCartelView] = useState('HORARIOS');
+            // Vista única que ven los estudiantes (configurable desde el panel Admin): 'HORARIOS' | 'EXAMENES'
+            const [vistaPublica, setVistaPublica] = useState('HORARIOS');
+            // Título del tótem editable desde el panel Admin
+            const [tituloTotem, setTituloTotem] = useState('COORDINACIÓN DOCENTE');
+            const [tituloDraft, setTituloDraft] = useState('');
+            // Estado de guardado de la configuración general (vista/título)
+            const [configSave, setConfigSave] = useState({ field: '', status: 'idle', msg: '' });
             const [examenSearch, setExamenSearch] = useState('');
             const [examenFechaFilter, setExamenFechaFilter] = useState('');
 
@@ -495,6 +501,10 @@ if (window.supabase) {
                 const init = async () => {
                     const cachedPin = safeStorage.getItem('totem_admin_pin');
                     if (cachedPin) setAdminPin(cachedPin);
+                    const cachedVista = safeStorage.getItem('totem_vista_publica');
+                    if (cachedVista) setVistaPublica(cachedVista);
+                    const cachedTitulo = safeStorage.getItem('totem_titulo');
+                    if (cachedTitulo) setTituloTotem(cachedTitulo);
                     if (window._sb) {
                         let cargado = false;
                         // 1) Sábana subida desde el panel (fuente de verdad para todos los dispositivos)
@@ -548,11 +558,14 @@ if (window.supabase) {
                             if (cached) { try { setSurveys(JSON.parse(cached)); } catch(e2) {} }
                         }
                         try {
-                            const { data: cfg } = await window._sb
-                                .from('totem_config').select('value').eq('key', 'admin_pin').maybeSingle();
-                            if (cfg && cfg.value) {
-                                setAdminPin(cfg.value);
-                                safeStorage.setItem('totem_admin_pin', cfg.value);
+                            const { data: cfgRows } = await window._sb
+                                .from('totem_config').select('key, value');
+                            if (Array.isArray(cfgRows)) {
+                                const cfgMap = {};
+                                cfgRows.forEach(r => { if (r && r.key) cfgMap[r.key] = r.value; });
+                                if (cfgMap.admin_pin) { setAdminPin(cfgMap.admin_pin); safeStorage.setItem('totem_admin_pin', cfgMap.admin_pin); }
+                                if (cfgMap.vista_publica) { setVistaPublica(cfgMap.vista_publica); safeStorage.setItem('totem_vista_publica', cfgMap.vista_publica); }
+                                if (cfgMap.titulo_totem) { setTituloTotem(cfgMap.titulo_totem); safeStorage.setItem('totem_titulo', cfgMap.titulo_totem); }
                             }
                         } catch(e) {}
                         // Cargar exámenes desde el servidor
@@ -697,13 +710,34 @@ if (window.supabase) {
                         }
                     ).subscribe();
 
-                realtimeChannelsRef.current = [presenceChannel, surveyChannel, sabanaChannel, examenesChannel];
+                // Realtime: cambios de configuración (vista pública / título) → aplicar en todos los tótems
+                const configChannel = window._sb
+                    .channel('totem_config_rt')
+                    .on('postgres_changes',
+                        { event: '*', schema: 'public', table: 'totem_config' },
+                        async () => {
+                            try {
+                                const { data: cfgRows } = await window._sb
+                                    .from('totem_config').select('key, value');
+                                if (Array.isArray(cfgRows)) {
+                                    const cfgMap = {};
+                                    cfgRows.forEach(r => { if (r && r.key) cfgMap[r.key] = r.value; });
+                                    if (cfgMap.admin_pin) { setAdminPin(cfgMap.admin_pin); safeStorage.setItem('totem_admin_pin', cfgMap.admin_pin); }
+                                    if (cfgMap.vista_publica) { setVistaPublica(cfgMap.vista_publica); safeStorage.setItem('totem_vista_publica', cfgMap.vista_publica); }
+                                    if (cfgMap.titulo_totem) { setTituloTotem(cfgMap.titulo_totem); safeStorage.setItem('totem_titulo', cfgMap.titulo_totem); }
+                                }
+                            } catch (e) {}
+                        }
+                    ).subscribe();
+
+                realtimeChannelsRef.current = [presenceChannel, surveyChannel, sabanaChannel, examenesChannel, configChannel];
 
                 return () => {
                     presenceChannel.unsubscribe();
                     surveyChannel.unsubscribe();
                     sabanaChannel.unsubscribe();
                     examenesChannel.unsubscribe();
+                    configChannel.unsubscribe();
                 };
             }, [sessionId]);
 
@@ -715,6 +749,9 @@ if (window.supabase) {
                     tab: activeTab.toLowerCase()
                 }).catch(() => {});
             }, [activeTab, sessionId]);
+
+            // Mantener el borrador del título en sincronía con el valor guardado
+            useEffect(() => { setTituloDraft(tituloTotem); }, [tituloTotem]);
 
             const formatExcelTime = (val) => {
                 if (val == null || val === '') return "00:00";
@@ -1357,6 +1394,70 @@ if (window.supabase) {
                 }
             };
 
+            // Guarda en totem_config (key/value) y persiste localmente. Se sincroniza por Realtime a todos los tótems.
+            const guardarConfig = async (key, value) => {
+                if (!window._sb) return false;
+                const { error } = await window._sb.from('totem_config').upsert(
+                    { key, value, updated_at: new Date().toISOString() },
+                    { onConflict: 'key' }
+                );
+                if (error) throw error;
+                return true;
+            };
+
+            // Cambia la vista única que ven los estudiantes (Horarios o Exámenes)
+            const cambiarVistaPublica = async (nuevaVista) => {
+                if (nuevaVista === vistaPublica) return;
+                setVistaPublica(nuevaVista);
+                safeStorage.setItem('totem_vista_publica', nuevaVista);
+                setConfigSave({ field: 'vista', status: 'saving', msg: '' });
+                try {
+                    await guardarConfig('vista_publica', nuevaVista);
+                    logEvento('admin_vista_publica', { vista: nuevaVista });
+                    setConfigSave({ field: 'vista', status: 'success', msg: '✓ Vista actualizada en todos los tótems.' });
+                } catch (e) {
+                    setConfigSave({ field: 'vista', status: 'error', msg: 'Se aplicó aquí, pero falló la sincronización. Revisa la conexión.' });
+                }
+            };
+
+            // Guarda el título del tótem (encabezado de la vista estudiante)
+            const guardarTitulo = async () => {
+                const nuevo = (tituloDraft || '').trim();
+                if (!nuevo) { setConfigSave({ field: 'titulo', status: 'error', msg: 'El título no puede quedar vacío.' }); return; }
+                if (nuevo === tituloTotem) { setConfigSave({ field: 'titulo', status: 'error', msg: 'El título es igual al actual.' }); return; }
+                setConfigSave({ field: 'titulo', status: 'saving', msg: '' });
+                setTituloTotem(nuevo);
+                safeStorage.setItem('totem_titulo', nuevo);
+                try {
+                    await guardarConfig('titulo_totem', nuevo);
+                    logEvento('admin_titulo_cambio');
+                    setConfigSave({ field: 'titulo', status: 'success', msg: '✓ Título actualizado en todos los tótems.' });
+                } catch (e) {
+                    setConfigSave({ field: 'titulo', status: 'error', msg: 'Se aplicó aquí, pero falló la sincronización. Revisa la conexión.' });
+                }
+            };
+
+            // Genera y descarga una plantilla Excel con la estructura de columnas para cargar exámenes
+            const descargarPlantillaExamenes = () => {
+                try {
+                    const headers = ['Fecha', 'Hora Inicio', 'Hora Fin', 'Sigla', 'Asignatura', 'Docente', 'Inscritos', 'Sala'];
+                    const ejemplos = [
+                        ['2026-07-15', '08:30', '10:30', 'GAA1101-013D', 'HERRAMIENTAS TECNOLÓGICAS I', 'ERVIO MARCELO ZAVALA', 38, 'LC606'],
+                        ['2026-07-15', '11:00', '13:00', 'MAT1180-007D', 'CÁLCULO I', 'PAOLA ANDREA RIVERA', 42, 'L302'],
+                        ['2026-07-16', '14:00', '16:00', 'PRG2201-004V', 'PROGRAMACIÓN AVANZADA', 'CARLOS MUÑOZ SOTO', 30, 'LAB-INF-2']
+                    ];
+                    const aoa = [headers, ...ejemplos];
+                    const ws = XLSX.utils.aoa_to_sheet(aoa);
+                    ws['!cols'] = [14, 12, 11, 16, 38, 30, 11, 14].map(wch => ({ wch }));
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, 'Exámenes');
+                    XLSX.writeFile(wb, 'Plantilla_Examenes_Totem.xlsx');
+                    logEvento('admin_examenes_plantilla');
+                } catch (e) {
+                    alert('No se pudo generar la plantilla. Intenta nuevamente.');
+                }
+            };
+
             if (!isLoaded) {
                 return (
                     <div className="app-shell w-screen flex flex-col items-center justify-center p-4 lg:p-8 select-none bg-duoc-blue dark:bg-duoc-darker transition-colors duration-300 overflow-y-auto">
@@ -1482,33 +1583,16 @@ if (window.supabase) {
             return (
                 <div className="app-shell w-screen flex flex-col select-none relative bg-slate-100 dark:bg-duoc-dark transition-colors duration-300">
                     
-                    <ClockHeader isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} trackAction={trackAction} />
+                    <ClockHeader isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} trackAction={trackAction} titulo={tituloTotem} />
 
                     {/* VISTA: CARTELERA (PÚBLICA) */}
                     {activeTab === 'CARTELERA' && (
                         <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
 
-                            {/* ── TOGGLE: Horarios / Exámenes ── */}
-                            <div className="shrink-0 flex bg-duoc-blue dark:bg-[#001a38] px-4 lg:px-8 gap-1 pt-2">
-                                <button
-                                    onClick={() => { setCartelView('HORARIOS'); trackAction('buttons'); }}
-                                    className={`flex items-center gap-2 px-5 py-2.5 lg:px-8 lg:py-3 font-black text-sm lg:text-lg rounded-t-xl transition-all ${cartelView === 'HORARIOS' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-md' : 'text-white/70 dark:text-slate-400 hover:text-white hover:bg-white/10'}`}
-                                >
-                                    <Icons.LayoutList cls="w-4 h-4 lg:w-5 lg:h-5" /> Horarios
-                                </button>
-                                <button
-                                    onClick={() => { setCartelView('EXAMENES'); trackAction('buttons'); logEvento('examenes_ver'); }}
-                                    className={`flex items-center gap-2 px-5 py-2.5 lg:px-8 lg:py-3 font-black text-sm lg:text-lg rounded-t-xl transition-all ${cartelView === 'EXAMENES' ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-white shadow-md' : 'text-white/70 dark:text-slate-400 hover:text-white hover:bg-white/10'}`}
-                                >
-                                    <Icons.GraduationCap cls="w-4 h-4 lg:w-5 lg:h-5" /> Exámenes
-                                    {examenes.length > 0 && cartelView !== 'EXAMENES' && (
-                                        <span className="bg-duoc-yellow text-duoc-blue text-[10px] font-black px-1.5 py-0.5 rounded-full leading-none">{examenes.length}</span>
-                                    )}
-                                </button>
-                            </div>
+                            {/* Vista única configurada desde el panel Admin (sin pestañas) */}
 
                             {/* ── VISTA: HORARIOS ── */}
-                            {cartelView === 'HORARIOS' && <>
+                            {vistaPublica === 'HORARIOS' && <>
 
                             {/* FILTROS Y ACCIONES PÚBLICAS */}
                             <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col lg:flex-row gap-3 shadow-sm z-0 items-stretch lg:items-center overflow-x-auto transition-colors duration-300 custom-scrollbar">
@@ -1736,7 +1820,7 @@ if (window.supabase) {
                             </>}
 
                             {/* ── VISTA: EXÁMENES ── */}
-                            {cartelView === 'EXAMENES' && (
+                            {vistaPublica === 'EXAMENES' && (
                                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
                                     {/* Barra de búsqueda y filtros de exámenes */}
                                     <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col sm:flex-row gap-3 shadow-sm transition-colors duration-300">
@@ -2084,6 +2168,64 @@ if (window.supabase) {
 
                                 {adminSubTab === 'UPLOAD' && (
                                     <div className="flex flex-col gap-6 lg:gap-8 animate-fade-in">
+
+                                        {/* ── Configuración de la vista estudiante ── */}
+                                        <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-6 lg:p-10 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <div className="flex items-center gap-3 mb-5 lg:mb-6">
+                                                <div className="w-11 h-11 lg:w-14 lg:h-14 bg-duoc-blue/10 dark:bg-duoc-yellow/15 text-duoc-blue dark:text-duoc-yellow rounded-full flex items-center justify-center shrink-0"><Icons.LayoutList cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
+                                                <div>
+                                                    <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white">Vista del estudiante</h3>
+                                                    <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-medium">Elige qué se muestra en el tótem · se aplica en todos los dispositivos</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Selector de vista única */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:gap-4 mb-6">
+                                                <button onClick={() => cambiarVistaPublica('HORARIOS')} className={`flex items-center gap-3 px-5 py-4 rounded-2xl border-2 text-left transition-all ${vistaPublica === 'HORARIOS' ? 'border-duoc-lightblue bg-blue-50 dark:bg-duoc-lightblue/20 dark:border-duoc-yellow' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-slate-300'}`}>
+                                                    <Icons.LayoutList cls={`w-7 h-7 shrink-0 ${vistaPublica === 'HORARIOS' ? 'text-duoc-lightblue dark:text-duoc-yellow' : 'text-slate-400'}`} />
+                                                    <div className="min-w-0">
+                                                        <div className="font-black text-base lg:text-lg text-duoc-blue dark:text-white">Horarios</div>
+                                                        <div className="text-xs lg:text-sm text-slate-500 dark:text-slate-400">Cartelera de clases del día</div>
+                                                    </div>
+                                                    {vistaPublica === 'HORARIOS' && <Icons.Check cls="w-5 h-5 ml-auto text-duoc-lightblue dark:text-duoc-yellow shrink-0" />}
+                                                </button>
+                                                <button onClick={() => cambiarVistaPublica('EXAMENES')} className={`flex items-center gap-3 px-5 py-4 rounded-2xl border-2 text-left transition-all ${vistaPublica === 'EXAMENES' ? 'border-duoc-lightblue bg-blue-50 dark:bg-duoc-lightblue/20 dark:border-duoc-yellow' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:border-slate-300'}`}>
+                                                    <Icons.GraduationCap cls={`w-7 h-7 shrink-0 ${vistaPublica === 'EXAMENES' ? 'text-duoc-lightblue dark:text-duoc-yellow' : 'text-slate-400'}`} />
+                                                    <div className="min-w-0">
+                                                        <div className="font-black text-base lg:text-lg text-duoc-blue dark:text-white">Exámenes</div>
+                                                        <div className="text-xs lg:text-sm text-slate-500 dark:text-slate-400">Calendario de exámenes</div>
+                                                    </div>
+                                                    {vistaPublica === 'EXAMENES' && <Icons.Check cls="w-5 h-5 ml-auto text-duoc-lightblue dark:text-duoc-yellow shrink-0" />}
+                                                </button>
+                                            </div>
+                                            {configSave.field === 'vista' && configSave.status !== 'idle' && (
+                                                <div className="text-sm lg:text-base font-semibold mb-6 -mt-2">
+                                                    {configSave.status === 'success' && <span className="text-green-600 dark:text-green-400">{configSave.msg}</span>}
+                                                    {configSave.status === 'error' && <span className="text-amber-500 dark:text-amber-400">{configSave.msg}</span>}
+                                                    {configSave.status === 'saving' && <span className="text-slate-400">Guardando…</span>}
+                                                </div>
+                                            )}
+
+                                            {/* Editor de título */}
+                                            <div className="border-t border-slate-100 dark:border-slate-700 pt-5 lg:pt-6">
+                                                <label className="block text-sm lg:text-base font-bold text-duoc-blue dark:text-white mb-1">Título del tótem</label>
+                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 mb-3">Texto que aparece en el encabezado de la vista estudiante.</p>
+                                                <div className="flex flex-col sm:flex-row gap-3">
+                                                    <input type="text" maxLength={60} value={tituloDraft} onChange={e => { setTituloDraft(e.target.value); setConfigSave({ field: 'titulo', status: 'idle', msg: '' }); }} onKeyDown={e => e.key === 'Enter' && guardarTitulo()} placeholder="COORDINACIÓN DOCENTE" className="flex-1 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-base outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow dark:text-white" />
+                                                    <button onClick={guardarTitulo} disabled={configSave.field === 'titulo' && configSave.status === 'saving'} className="shrink-0 flex items-center justify-center gap-2 px-6 py-3 bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl font-black text-base lg:text-lg hover:opacity-90 transition-opacity shadow-md disabled:opacity-50">
+                                                        <Icons.Check cls="w-5 h-5" /> Guardar título
+                                                    </button>
+                                                </div>
+                                                {configSave.field === 'titulo' && configSave.status !== 'idle' && (
+                                                    <div className="text-sm lg:text-base font-semibold mt-3 min-h-[1.25rem]">
+                                                        {configSave.status === 'success' && <span className="text-green-600 dark:text-green-400">{configSave.msg}</span>}
+                                                        {configSave.status === 'error' && <span className="text-amber-500 dark:text-amber-400">{configSave.msg}</span>}
+                                                        {configSave.status === 'saving' && <span className="text-slate-400">Guardando…</span>}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
                                         <div className="bg-white dark:bg-duoc-card rounded-[1.5rem] lg:rounded-[2rem] p-8 lg:p-12 shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 text-center relative overflow-hidden">
                                             <Icons.Upload cls="w-16 h-16 lg:w-20 lg:h-20 mx-auto text-duoc-lightblue dark:text-slate-400 mb-4 lg:mb-6" />
                                             <h3 className="text-2xl lg:text-3xl font-black text-duoc-blue dark:text-white mb-2 lg:mb-3">Reemplazar Base de Datos</h3>
@@ -2157,6 +2299,12 @@ if (window.supabase) {
                                                 <span className="text-sm lg:text-lg text-slate-400 font-medium">Primera fila = encabezados (Asignatura, Fecha, Hora, Sala…)</span>
                                                 <input type="file" accept=".xlsx, .xls, .csv" onChange={handleExamenesUpload} className="hidden" />
                                             </label>
+                                            <div className="mt-5 lg:mt-6 flex flex-col items-center gap-2">
+                                                <button onClick={descargarPlantillaExamenes} className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-duoc-blue dark:text-duoc-yellow border-2 border-slate-200 dark:border-slate-700 rounded-xl font-black text-base lg:text-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                                                    <Icons.Download cls="w-5 h-5" /> Descargar plantilla Excel
+                                                </button>
+                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 max-w-xl">Columnas: <span className="font-semibold text-slate-500 dark:text-slate-400">Fecha · Hora Inicio · Hora Fin · Sigla · Asignatura · Docente · Inscritos · Sala</span>. Incluye ejemplos; reemplázalos por tus exámenes y súbela.</p>
+                                            </div>
                                             {examenesInfo.status === 'subiendo' && (
                                                 <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-duoc-lightblue dark:text-blue-300 animate-pulse">
                                                     <Icons.Upload cls="w-5 h-5" /> Subiendo al servidor y sincronizando…
