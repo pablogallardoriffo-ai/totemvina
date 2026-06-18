@@ -80,7 +80,13 @@ if (window.supabase) {
             encuesta_cancelar: 'Encuestas canceladas', qr_abrir: 'Código QR', modo_oscuro: 'Modo oscuro',
             pantalla_completa: 'Pantalla completa', admin_acceso: 'Accesos admin', admin_tab: 'Navegación admin',
             admin_email_abrir: 'Reporte (abrir)', admin_email_enviado: 'Reporte enviado',
-            admin_upload_inicio: 'Carga datos (inicio)', admin_upload_exito: 'Carga datos (éxito)'
+            admin_upload_inicio: 'Carga datos (inicio)', admin_upload_exito: 'Carga datos (éxito)',
+            admin_periodo: 'Cambio de período', admin_pin_cambio: 'Cambio de clave',
+            admin_vista_publica: 'Cambio de vista', admin_titulo_cambio: 'Cambio de título',
+            admin_sabana_sync: 'Sábana sincronizada', admin_sabana_descarga: 'Sábana descargada',
+            admin_examenes_sync: 'Exámenes sincronizados', admin_examenes_descarga: 'Exámenes descargados',
+            admin_examenes_eliminar: 'Exámenes eliminados', admin_examenes_inicio: 'Carga exámenes',
+            admin_examenes_plantilla: 'Plantilla descargada'
         };
 
         const Icons = {
@@ -241,7 +247,7 @@ if (window.supabase) {
             const recentLocalSurveyRef = useRef(false);
             const realtimeChannelsRef = useRef([]);
             const [emailModal, setEmailModal] = useState({ show: false, target: '', status: 'idle', errorMsg: '' });
-            const [analytics, setAnalytics] = useState({ loaded: false, totals: { interacciones: 0, clicks: 0, filtros: 0, botones: 0, sesiones: 0, eventos: 0 }, porDia: {}, porTipo: {} });
+            const [analytics, setAnalytics] = useState({ loaded: false, totals: { interacciones: 0, clicks: 0, filtros: 0, botones: 0, sesiones: 0, eventos: 0 }, porDia: {}, porTipo: {}, eventos: [] });
             const [periodo, setPeriodo] = useState('dia');
             const [adminPin, setAdminPin] = useState('010203');
             const [pinChange, setPinChange] = useState({ current: '', next: '', confirm: '', status: 'idle', msg: '' });
@@ -311,7 +317,7 @@ if (window.supabase) {
                 try {
                     const [mRes, eRes] = await Promise.all([
                         window._sb.from('totem_metricas').select('clicks,filters,buttons,created_at').limit(20000),
-                        window._sb.from('totem_eventos').select('tipo,created_at').limit(50000)
+                        window._sb.from('totem_eventos').select('tipo,detalle,created_at').limit(50000)
                     ]);
                     const mRows = mRes.data || [];
                     const eRows = eRes.data || [];
@@ -332,10 +338,22 @@ if (window.supabase) {
                         loaded: true,
                         totals: { interacciones: tC + tF + tB, clicks: tC, filtros: tF, botones: tB, sesiones: tS, eventos: eRows.length },
                         porDia: dayMap,
-                        porTipo: porTipo
+                        porTipo: porTipo,
+                        eventos: eRows
                     });
                 } catch (e) { /* offline: se mantiene el estado previo */ }
             };
+
+            // Inicio de la ventana de tiempo según el período elegido (mismas ventanas que el gráfico).
+            const periodoDesde = useMemo(() => {
+                const d = new Date();
+                if (periodo === 'dia') d.setDate(d.getDate() - 13);                       // 14 días (incl. hoy)
+                else if (periodo === 'semana') d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 * 7); // 8 semanas
+                else d.setMonth(d.getMonth() - 5, 1);                                      // 6 meses
+                d.setHours(0, 0, 0, 0);
+                return d;
+            }, [periodo]);
+            const periodoVentanaLabel = { dia: 'Últimos 14 días', semana: 'Últimas 8 semanas', mes: 'Últimos 6 meses' }[periodo];
 
             const analyticsBuckets = useMemo(() => {
                 const dm = analytics.porDia || {};
@@ -367,8 +385,52 @@ if (window.supabase) {
                 return out;
             }, [analytics, periodo]);
             const bucketMax = Math.max(1, ...analyticsBuckets.map(b => b.interacciones));
-            const eventosOrdenados = useMemo(() => Object.entries(analytics.porTipo || {}).sort((a, b) => b[1] - a[1]), [analytics]);
+
+            // KPIs acotados a la ventana del período (antes eran histórico fijo).
+            const periodoStats = useMemo(() => {
+                const dm = analytics.porDia || {};
+                const r = { interacciones: 0, clicks: 0, filtros: 0, botones: 0, sesiones: 0, eventos: 0 };
+                Object.entries(dm).forEach(([k, v]) => {
+                    if (new Date(k + 'T00:00:00') >= periodoDesde) {
+                        r.interacciones += v.interacciones; r.clicks += v.clicks;
+                        r.filtros += v.filtros; r.botones += v.botones; r.sesiones += v.sesiones;
+                    }
+                });
+                (analytics.eventos || []).forEach(e => { if (e.created_at && new Date(e.created_at) >= periodoDesde) r.eventos++; });
+                return r;
+            }, [analytics, periodoDesde]);
+
+            // Desglose por tipo de interacción, acotado a la ventana del período.
+            const eventosOrdenados = useMemo(() => {
+                const porTipo = {};
+                (analytics.eventos || []).forEach(e => {
+                    if (e.tipo && e.created_at && new Date(e.created_at) >= periodoDesde) porTipo[e.tipo] = (porTipo[e.tipo] || 0) + 1;
+                });
+                return Object.entries(porTipo).sort((a, b) => b[1] - a[1]);
+            }, [analytics, periodoDesde]);
             const eventosMax = Math.max(1, ...eventosOrdenados.map(e => e[1]));
+
+            // Actividad por hora del día (0-23) en la ventana del período → detecta horas pico.
+            const horasActividad = useMemo(() => {
+                const arr = Array.from({ length: 24 }, () => 0);
+                (analytics.eventos || []).forEach(e => {
+                    if (e.created_at && new Date(e.created_at) >= periodoDesde) arr[new Date(e.created_at).getHours()]++;
+                });
+                return arr;
+            }, [analytics, periodoDesde]);
+            const horaMax = Math.max(1, ...horasActividad);
+            const horaPico = horasActividad.indexOf(Math.max(...horasActividad));
+
+            // Términos más buscados en la ventana del período (desde el detalle de los eventos 'busqueda').
+            const topBusquedas = useMemo(() => {
+                const conteo = {};
+                (analytics.eventos || []).forEach(e => {
+                    if (e.tipo !== 'busqueda' || !e.created_at || new Date(e.created_at) < periodoDesde) return;
+                    const t = (e.detalle && e.detalle.termino ? String(e.detalle.termino) : '').trim().toLowerCase();
+                    if (t.length >= 2) conteo[t] = (conteo[t] || 0) + 1;
+                });
+                return Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 8);
+            }, [analytics, periodoDesde]);
 
             // Efectos Iniciales
             useEffect(() => {
@@ -2053,11 +2115,18 @@ if (window.supabase) {
                                         <div className="flex items-center justify-between gap-3 flex-wrap">
                                             <div>
                                                 <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white">Analítica de uso</h3>
-                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-medium">Histórico acumulado de todos los dispositivos</p>
+                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 font-medium">Todos los dispositivos · <span className="font-bold text-duoc-lightblue dark:text-duoc-yellow">{periodoVentanaLabel}</span></p>
                                             </div>
-                                            <button onClick={() => { cargarAnaliticas(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-sm hover:bg-slate-200 dark:hover:text-white transition-colors shadow-sm border border-transparent dark:border-slate-700">
-                                                <Icons.Clock cls="w-4 h-4" /> Actualizar
-                                            </button>
+                                            <div className="flex items-center gap-2">
+                                                <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl shadow-inner">
+                                                    {[['dia','Día'],['semana','Semana'],['mes','Mes']].map(([k,lbl]) => (
+                                                        <button key={k} onClick={() => { setPeriodo(k); logEvento('admin_periodo', {periodo:k}); }} className={`px-3 lg:px-5 py-1.5 lg:py-2 rounded-lg font-bold text-xs lg:text-base transition-all ${periodo===k ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-duoc-yellow shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{lbl}</button>
+                                                    ))}
+                                                </div>
+                                                <button onClick={() => { cargarAnaliticas(); }} className="flex items-center gap-2 px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl font-bold text-sm hover:bg-slate-200 dark:hover:text-white transition-colors shadow-sm border border-transparent dark:border-slate-700">
+                                                    <Icons.Clock cls="w-4 h-4" /> Actualizar
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* ── KPIs globales ── */}
@@ -2065,22 +2134,22 @@ if (window.supabase) {
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-duoc-blue/10 dark:bg-duoc-yellow/15 text-duoc-blue dark:text-duoc-yellow rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.LayoutList cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Interacciones</div>
-                                                <div className="text-3xl lg:text-5xl font-black text-duoc-blue dark:text-white tabular-nums">{analytics.totals.interacciones.toLocaleString('es-CL')}</div>
+                                                <div className="text-3xl lg:text-5xl font-black text-duoc-blue dark:text-white tabular-nums">{periodoStats.interacciones.toLocaleString('es-CL')}</div>
                                             </div>
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-duoc-lightblue/10 dark:bg-duoc-lightblue/20 text-duoc-lightblue dark:text-blue-300 rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.Users cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Toques</div>
-                                                <div className="text-3xl lg:text-5xl font-black text-duoc-lightblue dark:text-white tabular-nums">{analytics.totals.clicks.toLocaleString('es-CL')}</div>
+                                                <div className="text-3xl lg:text-5xl font-black text-duoc-lightblue dark:text-white tabular-nums">{periodoStats.clicks.toLocaleString('es-CL')}</div>
                                             </div>
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.Filter cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Filtros</div>
-                                                <div className="text-3xl lg:text-5xl font-black text-purple-700 dark:text-white tabular-nums">{analytics.totals.filtros.toLocaleString('es-CL')}</div>
+                                                <div className="text-3xl lg:text-5xl font-black text-purple-700 dark:text-white tabular-nums">{periodoStats.filtros.toLocaleString('es-CL')}</div>
                                             </div>
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.Check cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Botones</div>
-                                                <div className="text-3xl lg:text-5xl font-black text-emerald-700 dark:text-white tabular-nums">{analytics.totals.botones.toLocaleString('es-CL')}</div>
+                                                <div className="text-3xl lg:text-5xl font-black text-emerald-700 dark:text-white tabular-nums">{periodoStats.botones.toLocaleString('es-CL')}</div>
                                             </div>
                                         </div>
 
@@ -2089,16 +2158,11 @@ if (window.supabase) {
                                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 lg:mb-7">
                                                 <div>
                                                     <h3 className="text-lg lg:text-2xl font-black text-duoc-blue dark:text-white">Tendencia de interacciones</h3>
-                                                    <p className="text-xs lg:text-sm text-slate-400 font-medium">{analytics.totals.sesiones.toLocaleString('es-CL')} sesiones · {analytics.totals.eventos.toLocaleString('es-CL')} eventos registrados</p>
-                                                </div>
-                                                <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl shadow-inner self-start sm:self-auto">
-                                                    {[['dia','Día'],['semana','Semana'],['mes','Mes']].map(([k,lbl]) => (
-                                                        <button key={k} onClick={() => setPeriodo(k)} className={`px-3 lg:px-5 py-1.5 lg:py-2 rounded-lg font-bold text-xs lg:text-base transition-all ${periodo===k ? 'bg-white dark:bg-duoc-card text-duoc-blue dark:text-duoc-yellow shadow-sm' : 'text-slate-500 dark:text-slate-400'}`}>{lbl}</button>
-                                                    ))}
+                                                    <p className="text-xs lg:text-sm text-slate-400 font-medium">{periodoStats.sesiones.toLocaleString('es-CL')} sesiones · {periodoStats.eventos.toLocaleString('es-CL')} eventos · {periodoVentanaLabel.toLowerCase()}</p>
                                                 </div>
                                             </div>
-                                            {analytics.totals.interacciones === 0 ? (
-                                                <div className="h-44 lg:h-56 flex items-center justify-center text-slate-400 text-sm lg:text-lg">Aún no hay interacciones registradas.</div>
+                                            {periodoStats.interacciones === 0 ? (
+                                                <div className="h-44 lg:h-56 flex items-center justify-center text-slate-400 text-sm lg:text-lg">Sin interacciones en {periodoVentanaLabel.toLowerCase()}.</div>
                                             ) : (
                                                 <>
                                                     <div className="flex items-end gap-1 lg:gap-2 h-44 lg:h-56 border-b-2 border-slate-100 dark:border-slate-700">
@@ -2120,9 +2184,10 @@ if (window.supabase) {
 
                                         {/* ── Desglose por tipo de interacción ── */}
                                         <div className="bg-white dark:bg-duoc-card p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
-                                            <h3 className="text-lg lg:text-2xl font-black text-duoc-blue dark:text-white mb-4 lg:mb-6">Desglose por tipo de interacción</h3>
+                                            <h3 className="text-lg lg:text-2xl font-black text-duoc-blue dark:text-white mb-1">Desglose por tipo de interacción</h3>
+                                            <p className="text-xs lg:text-sm text-slate-400 font-medium mb-4 lg:mb-6">{periodoVentanaLabel}</p>
                                             {eventosOrdenados.length === 0 ? (
-                                                <p className="text-slate-400 text-sm lg:text-lg">Aún no hay eventos registrados.</p>
+                                                <p className="text-slate-400 text-sm lg:text-lg">Sin eventos en {periodoVentanaLabel.toLowerCase()}.</p>
                                             ) : (
                                                 <div className="flex flex-col gap-3 lg:gap-4">
                                                     {eventosOrdenados.map(([tipo,total]) => (
@@ -2134,6 +2199,55 @@ if (window.supabase) {
                                                                 </div>
                                                             </div>
                                                         </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* ── Actividad por hora del día (horas pico) ── */}
+                                        <div className="bg-white dark:bg-duoc-card p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 lg:mb-6">
+                                                <div>
+                                                    <h3 className="text-lg lg:text-2xl font-black text-duoc-blue dark:text-white">Actividad por hora del día</h3>
+                                                    <p className="text-xs lg:text-sm text-slate-400 font-medium">{periodoVentanaLabel} · cuándo se usa más el tótem</p>
+                                                </div>
+                                                {periodoStats.eventos > 0 && (
+                                                    <span className="self-start sm:self-auto text-xs lg:text-sm font-bold bg-duoc-yellow/20 text-duoc-blue dark:text-duoc-yellow px-3 py-1.5 rounded-lg">Hora pico: {String(horaPico).padStart(2,'0')}:00</span>
+                                                )}
+                                            </div>
+                                            {periodoStats.eventos === 0 ? (
+                                                <div className="h-28 lg:h-36 flex items-center justify-center text-slate-400 text-sm lg:text-lg">Sin actividad en {periodoVentanaLabel.toLowerCase()}.</div>
+                                            ) : (
+                                                <>
+                                                    <div className="flex items-end gap-px lg:gap-1 h-28 lg:h-40 border-b-2 border-slate-100 dark:border-slate-700">
+                                                        {horasActividad.map((c,h) => (
+                                                            <div key={h} className="flex-1 flex flex-col items-center justify-end h-full min-w-0 group">
+                                                                <div className={`w-full rounded-t-sm transition-all duration-500 group-hover:opacity-80 ${h===horaPico ? 'bg-duoc-yellow' : 'bg-gradient-to-t from-duoc-lightblue to-duoc-blue dark:from-slate-600 dark:to-slate-400'}`} style={{height: (c / horaMax * 100) + '%'}} title={String(h).padStart(2,'0') + ':00 · ' + c + ' eventos'}></div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="flex gap-px lg:gap-1 mt-1.5">
+                                                        {horasActividad.map((c,h) => (
+                                                            <span key={h} className="flex-1 text-[7px] lg:text-[10px] text-slate-400 text-center min-w-0">{h % 3 === 0 ? String(h).padStart(2,'0') : ''}</span>
+                                                        ))}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+
+                                        {/* ── Términos más buscados ── */}
+                                        <div className="bg-white dark:bg-duoc-card p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <h3 className="text-lg lg:text-2xl font-black text-duoc-blue dark:text-white mb-1">Términos más buscados</h3>
+                                            <p className="text-xs lg:text-sm text-slate-400 font-medium mb-4 lg:mb-6">{periodoVentanaLabel} · qué buscan los estudiantes</p>
+                                            {topBusquedas.length === 0 ? (
+                                                <p className="text-slate-400 text-sm lg:text-lg">Sin búsquedas registradas en {periodoVentanaLabel.toLowerCase()}.</p>
+                                            ) : (
+                                                <div className="flex flex-wrap gap-2 lg:gap-3">
+                                                    {topBusquedas.map(([termino,veces]) => (
+                                                        <span key={termino} className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 px-3 py-2 lg:px-4 lg:py-2.5 rounded-xl text-sm lg:text-base font-semibold border border-slate-100 dark:border-slate-700">
+                                                            {termino}
+                                                            <span className="bg-duoc-lightblue/15 dark:bg-duoc-yellow/20 text-duoc-lightblue dark:text-duoc-yellow text-xs lg:text-sm font-black px-2 py-0.5 rounded-full tabular-nums">{veces}</span>
+                                                        </span>
                                                     ))}
                                                 </div>
                                             )}
