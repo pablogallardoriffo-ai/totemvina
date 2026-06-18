@@ -86,7 +86,7 @@ if (window.supabase) {
             admin_sabana_sync: 'Sábana sincronizada', admin_sabana_descarga: 'Sábana descargada',
             admin_examenes_sync: 'Exámenes sincronizados', admin_examenes_descarga: 'Exámenes descargados',
             admin_examenes_eliminar: 'Exámenes eliminados', admin_examenes_inicio: 'Carga exámenes',
-            admin_examenes_plantilla: 'Plantilla descargada'
+            admin_examenes_plantilla: 'Plantilla descargada', admin_export_csv: 'Exportación CSV'
         };
 
         const Icons = {
@@ -431,6 +431,75 @@ if (window.supabase) {
                 });
                 return Object.entries(conteo).sort((a, b) => b[1] - a[1]).slice(0, 8);
             }, [analytics, periodoDesde]);
+
+            // Ventana inmediatamente anterior (misma duración) para comparar.
+            const periodoAnteriorDesde = useMemo(() => {
+                const d = new Date(periodoDesde);
+                if (periodo === 'dia') d.setDate(d.getDate() - 14);
+                else if (periodo === 'semana') d.setDate(d.getDate() - 56);
+                else d.setMonth(d.getMonth() - 6);
+                return d;
+            }, [periodo, periodoDesde]);
+            const periodoAnteriorStats = useMemo(() => {
+                const dm = analytics.porDia || {};
+                const r = { interacciones: 0, clicks: 0, filtros: 0, botones: 0 };
+                Object.entries(dm).forEach(([k, v]) => {
+                    const d = new Date(k + 'T00:00:00');
+                    if (d >= periodoAnteriorDesde && d < periodoDesde) {
+                        r.interacciones += v.interacciones; r.clicks += v.clicks; r.filtros += v.filtros; r.botones += v.botones;
+                    }
+                });
+                return r;
+            }, [analytics, periodoAnteriorDesde, periodoDesde]);
+            // % de variación vs período anterior → JSX para mostrar bajo cada KPI.
+            const deltaBadge = (cur, prev) => {
+                if (!prev && !cur) return null;
+                const pct = prev ? Math.round((cur - prev) / prev * 100) : 100;
+                const up = cur >= prev;
+                return <div title={`vs ${periodoVentanaLabel.toLowerCase()} previos (${prev.toLocaleString('es-CL')})`} className={`mt-1 text-[10px] lg:text-xs font-bold flex items-center gap-0.5 ${up ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>{up ? '▲' : '▼'} {Math.abs(pct)}%</div>;
+            };
+
+            // Secciones y escuelas más filtradas en la ventana del período.
+            const topFiltro = (tipo, campo) => {
+                const c = {};
+                (analytics.eventos || []).forEach(e => {
+                    if (e.tipo !== tipo || !e.created_at || new Date(e.created_at) < periodoDesde) return;
+                    const v = e.detalle && e.detalle[campo] ? String(e.detalle[campo]).trim() : '';
+                    if (v && v.toLowerCase() !== 'todas') c[v] = (c[v] || 0) + 1;
+                });
+                return Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 6);
+            };
+            const topSecciones = useMemo(() => topFiltro('filtro_seccion', 'seccion'), [analytics, periodoDesde]);
+            const topEscuelas = useMemo(() => topFiltro('filtro_escuela', 'escuela'), [analytics, periodoDesde]);
+
+            // Mapa de calor semanal: 7 días (Lun-Dom) × 24 horas, intensidad por nº de eventos.
+            const heatmapSemanal = useMemo(() => {
+                const g = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+                (analytics.eventos || []).forEach(e => {
+                    if (!e.created_at) return;
+                    const d = new Date(e.created_at);
+                    if (d < periodoDesde) return;
+                    g[(d.getDay() + 6) % 7][d.getHours()]++;
+                });
+                return g;
+            }, [analytics, periodoDesde]);
+            const heatmapMax = Math.max(1, ...heatmapSemanal.flat());
+
+            // Descarga de las métricas y el desglose del período como CSV.
+            const exportarCSV = () => {
+                const dm = analytics.porDia || {};
+                const fechas = Object.keys(dm).filter(k => new Date(k + 'T00:00:00') >= periodoDesde).sort();
+                let csv = '﻿Fecha,Interacciones,Toques,Filtros,Botones,Sesiones\n';
+                fechas.forEach(k => { const v = dm[k]; csv += [k, v.interacciones, v.clicks, v.filtros, v.botones, v.sesiones].join(',') + '\n'; });
+                csv += '\nTipo de evento,Total\n';
+                eventosOrdenados.forEach(([t, n]) => { csv += '"' + (EVENTO_LABELS[t] || t) + '",' + n + '\n'; });
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'totem_estadisticas_' + periodo + '_' + new Date().toISOString().slice(0, 10) + '.csv';
+                a.click(); URL.revokeObjectURL(url);
+                logEvento('admin_export_csv', { periodo });
+            };
 
             // Efectos Iniciales
             useEffect(() => {
@@ -2135,21 +2204,25 @@ if (window.supabase) {
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-duoc-blue/10 dark:bg-duoc-yellow/15 text-duoc-blue dark:text-duoc-yellow rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.LayoutList cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Interacciones</div>
                                                 <div className="text-3xl lg:text-5xl font-black text-duoc-blue dark:text-white tabular-nums">{periodoStats.interacciones.toLocaleString('es-CL')}</div>
+                                                {deltaBadge(periodoStats.interacciones, periodoAnteriorStats.interacciones)}
                                             </div>
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-duoc-lightblue/10 dark:bg-duoc-lightblue/20 text-duoc-lightblue dark:text-blue-300 rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.Users cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Toques</div>
                                                 <div className="text-3xl lg:text-5xl font-black text-duoc-lightblue dark:text-white tabular-nums">{periodoStats.clicks.toLocaleString('es-CL')}</div>
+                                                {deltaBadge(periodoStats.clicks, periodoAnteriorStats.clicks)}
                                             </div>
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.Filter cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Filtros</div>
                                                 <div className="text-3xl lg:text-5xl font-black text-purple-700 dark:text-white tabular-nums">{periodoStats.filtros.toLocaleString('es-CL')}</div>
+                                                {deltaBadge(periodoStats.filtros, periodoAnteriorStats.filtros)}
                                             </div>
                                             <div className="bg-white dark:bg-duoc-card p-4 lg:p-7 rounded-2xl lg:rounded-[1.75rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center">
                                                 <div className="w-10 h-10 lg:w-14 lg:h-14 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mb-2 lg:mb-3"><Icons.Check cls="w-5 h-5 lg:w-7 lg:h-7" /></div>
                                                 <div className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-0.5 lg:mb-1 text-[11px] lg:text-sm">Botones</div>
                                                 <div className="text-3xl lg:text-5xl font-black text-emerald-700 dark:text-white tabular-nums">{periodoStats.botones.toLocaleString('es-CL')}</div>
+                                                {deltaBadge(periodoStats.botones, periodoAnteriorStats.botones)}
                                             </div>
                                         </div>
 
@@ -2253,17 +2326,75 @@ if (window.supabase) {
                                             )}
                                         </div>
 
+                                        {/* ── Mapa de calor semanal (día × hora) ── */}
+                                        <div className="bg-white dark:bg-duoc-card p-5 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                            <h3 className="text-lg lg:text-2xl font-black text-duoc-blue dark:text-white mb-1">Mapa de calor semanal</h3>
+                                            <p className="text-xs lg:text-sm text-slate-400 font-medium mb-4 lg:mb-6">{periodoVentanaLabel} · intensidad de uso por día y hora</p>
+                                            {periodoStats.eventos === 0 ? (
+                                                <p className="text-slate-400 text-sm lg:text-lg">Sin actividad en {periodoVentanaLabel.toLowerCase()}.</p>
+                                            ) : (
+                                                <div className="overflow-x-auto custom-scrollbar -mx-1 px-1">
+                                                    <div className="min-w-[520px]">
+                                                        <div className="flex gap-px mb-1 pl-8 lg:pl-10">
+                                                            {Array.from({length:24}).map((_,h) => (
+                                                                <span key={h} className="flex-1 text-[7px] lg:text-[9px] text-slate-400 text-center min-w-0">{h % 3 === 0 ? String(h).padStart(2,'0') : ''}</span>
+                                                            ))}
+                                                        </div>
+                                                        {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map((dia,di) => (
+                                                            <div key={dia} className="flex items-center gap-px mb-px">
+                                                                <span className="w-8 lg:w-10 shrink-0 text-[9px] lg:text-xs font-bold text-slate-500 dark:text-slate-400">{dia}</span>
+                                                                {heatmapSemanal[di].map((c,h) => (
+                                                                    <div key={h} className="flex-1 aspect-square rounded-sm min-w-0 bg-slate-100 dark:bg-slate-800" style={c > 0 ? {backgroundColor: 'rgba(0,142,214,' + (0.15 + 0.85 * (c / heatmapMax)) + ')'} : undefined} title={dia + ' ' + String(h).padStart(2,'0') + ':00 · ' + c + ' eventos'}></div>
+                                                                ))}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* ── Lo más consultado: secciones y escuelas ── */}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-6">
+                                            {[['Secciones más filtradas', topSecciones], ['Escuelas más filtradas', topEscuelas]].map(([titulo, lista]) => (
+                                                <div key={titulo} className="bg-white dark:bg-duoc-card p-5 lg:p-7 rounded-[1.5rem] lg:rounded-[2rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700">
+                                                    <h3 className="text-base lg:text-xl font-black text-duoc-blue dark:text-white mb-1">{titulo}</h3>
+                                                    <p className="text-xs lg:text-sm text-slate-400 font-medium mb-3 lg:mb-4">{periodoVentanaLabel}</p>
+                                                    {lista.length === 0 ? (
+                                                        <p className="text-slate-400 text-sm">Sin datos en este período.</p>
+                                                    ) : (
+                                                        <ol className="flex flex-col gap-2">
+                                                            {lista.map(([nombre, veces], i) => (
+                                                                <li key={nombre} className="flex items-center gap-3">
+                                                                    <span className="w-5 lg:w-6 shrink-0 text-center text-xs lg:text-sm font-black text-slate-400">{i + 1}</span>
+                                                                    <span className="flex-1 text-sm lg:text-base font-semibold text-slate-700 dark:text-slate-200 truncate">{nombre}</span>
+                                                                    <span className="bg-slate-100 dark:bg-slate-800 text-duoc-blue dark:text-duoc-yellow text-xs lg:text-sm font-black px-2.5 py-1 rounded-full tabular-nums">{veces}</span>
+                                                                </li>
+                                                            ))}
+                                                        </ol>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+
                                         <div className="bg-white dark:bg-duoc-card p-6 lg:p-8 rounded-[1.5rem] lg:rounded-[2rem] shadow-sm lg:shadow-md border border-slate-100 dark:border-slate-700 flex flex-col md:flex-row justify-between items-center gap-6">
                                             <div className="text-center md:text-left flex-1">
-                                                <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white mb-2">Reporte Diario</h3>
-                                                <p className="text-sm lg:text-xl text-slate-500 dark:text-slate-400">Envíate un resumen con las métricas de uso y encuestas a tu correo.</p>
+                                                <h3 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-white mb-2">Exportar y reportar</h3>
+                                                <p className="text-sm lg:text-xl text-slate-500 dark:text-slate-400">Descarga los datos del período en CSV o envíate un resumen con las métricas y encuestas por correo.</p>
                                             </div>
-                                            <button 
-                                                onClick={() => { setEmailModal({show: true, target: '', status: 'idle', errorMsg: ''}); logEvento('admin_email_abrir'); }}
-                                                className="w-full md:w-auto shrink-0 flex items-center justify-center gap-2 lg:gap-3 px-6 py-3 lg:px-6 lg:py-4 bg-duoc-yellow text-duoc-blue rounded-xl font-black text-lg lg:text-xl hover:bg-yellow-400 transition-colors shadow-md"
-                                            >
-                                                <Icons.Mail cls="w-5 h-5 lg:w-6 lg:h-6" /> Enviar por Correo
-                                            </button>
+                                            <div className="w-full md:w-auto shrink-0 flex flex-col sm:flex-row gap-3">
+                                                <button
+                                                    onClick={exportarCSV}
+                                                    className="flex items-center justify-center gap-2 lg:gap-3 px-6 py-3 lg:px-6 lg:py-4 bg-slate-100 dark:bg-slate-800 text-duoc-blue dark:text-slate-200 rounded-xl font-black text-lg lg:text-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shadow-md border border-transparent dark:border-slate-700"
+                                                >
+                                                    <Icons.LayoutList cls="w-5 h-5 lg:w-6 lg:h-6" /> Exportar CSV
+                                                </button>
+                                                <button
+                                                    onClick={() => { setEmailModal({show: true, target: '', status: 'idle', errorMsg: ''}); logEvento('admin_email_abrir'); }}
+                                                    className="flex items-center justify-center gap-2 lg:gap-3 px-6 py-3 lg:px-6 lg:py-4 bg-duoc-yellow text-duoc-blue rounded-xl font-black text-lg lg:text-xl hover:bg-yellow-400 transition-colors shadow-md"
+                                                >
+                                                    <Icons.Mail cls="w-5 h-5 lg:w-6 lg:h-6" /> Enviar por Correo
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
