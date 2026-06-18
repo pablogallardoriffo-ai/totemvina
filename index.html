@@ -1002,6 +1002,20 @@ if (window.supabase) {
                 reader.readAsArrayBuffer(file);
             };
 
+            // Clave única de una clase para detectar duplicados (mismo día/horario/sala/docente/etc.)
+            const claveClase = (c) => [c.dia, c.horaInicio, c.horaFin, c.sala, c.docente, c.asignatura, c.seccion, c.jornada, c.escuela]
+                .map(v => String(v ?? '').trim().toLowerCase()).join('|');
+
+            const dedupClases = (lista) => {
+                const vistos = new Set();
+                return (lista || []).filter(item => {
+                    const k = claveClase(item);
+                    if (vistos.has(k)) return false;
+                    vistos.add(k);
+                    return true;
+                });
+            };
+
             const processData = (rows) => {
                 if (rows.length < 2) { setError('El archivo parece estar vacío.'); return null; }
                 const dataRows = rows.slice(1);
@@ -1027,8 +1041,12 @@ if (window.supabase) {
                     });
                 });
 
-                const datosValidos = processed.filter(item => item.asignatura && item.horaInicio !== '00:00');
-                if (datosValidos.length === 0) { setError('No se encontraron clases válidas. Verifica la estructura.'); return null; }
+                const datosFiltrados = processed.filter(item => item.asignatura && item.horaInicio !== '00:00');
+                if (datosFiltrados.length === 0) { setError('No se encontraron clases válidas. Verifica la estructura.'); return null; }
+
+                // Omitir clases duplicadas: misma jornada, día, horario, sala, docente, asignatura y sección.
+                // A veces la sábana trae filas repetidas; mostramos solo una.
+                const datosValidos = dedupClases(datosFiltrados);
 
                 setData(datosValidos);
                 setAvailableEscuelas([...new Set(datosValidos.map(i => i.escuela).filter(Boolean))].sort());
@@ -1060,7 +1078,7 @@ if (window.supabase) {
                     if (diffStart <= 30 && diffStart > 0) {
                         return { texto: '¡POR EMPEZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
                     }
-                    return { texto: 'POR REALIZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: false };
+                    return { texto: 'POR COMENZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: false };
                 } else if (currentMins >= endMins) {
                     return { texto: 'REALIZADA', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-500', border: 'border-slate-200 dark:border-slate-700', isImportant: false };
                 } else {
@@ -1090,7 +1108,7 @@ if (window.supabase) {
                 return null;
             };
 
-            // Estado del examen leído igual que una clase de la sábana (en curso / por realizar / realizado)
+            // Estado del examen leído igual que una clase de la sábana (en curso / por comenzar / realizado)
             const getExamenStatus = (ex) => {
                 const fechaStr = ex.fecha || ex.fecha_examen || ex.fecha_de_examen || ex.date || '';
                 const fecha = parseExamenFecha(fechaStr);
@@ -1121,7 +1139,7 @@ if (window.supabase) {
                 const diffEnd = endMins - currentMins;
                 if (currentMins < startMins) {
                     if (diffStart <= 30) return { texto: '¡POR EMPEZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
-                    return { texto: 'HOY · POR REALIZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: true };
+                    return { texto: 'HOY · POR COMENZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: true };
                 } else if (currentMins >= endMins) {
                     return { texto: 'REALIZADO', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-500', border: 'border-slate-200 dark:border-slate-700', isImportant: false };
                 } else {
@@ -1131,7 +1149,7 @@ if (window.supabase) {
             };
 
             const sortedFilteredData = useMemo(() => {
-                const filtered = data.filter(item => {
+                const filtered = dedupClases(data).filter(item => {
                     const statusInfo = getClaseStatus(item);
                     const matchDia = activeDia === 'Todos' || item.dia === activeDia;
                     const matchJornada = selectedJornada === '' || item.jornada === selectedJornada;
@@ -1622,14 +1640,15 @@ if (window.supabase) {
                                             trackAction('filters');
                                             logEvento('filtro_rapido', {estado:'en_curso', activo: newState !== 'ALL'});
                                         }}
-                                        className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all shadow-sm border-2 lg:border-[3px] flex-1 ${
-                                            activeFilter === 'EN_CURSO' 
-                                            ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 border-green-500' 
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all border-2 lg:border-[3px] flex-1 ${
+                                            activeFilter === 'EN_CURSO'
+                                            ? 'bg-green-500 dark:bg-green-600 text-white border-green-600 dark:border-green-400 ring-2 ring-green-300 dark:ring-green-500/40 shadow-md'
+                                            : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border-green-400/70 dark:border-green-700 shadow-sm hover:bg-green-100 dark:hover:bg-green-900/40'
                                         }`}
                                     >
-                                        <div className={`w-2.5 h-2.5 lg:w-3 lg:h-3 rounded-full animate-pulse ${activeFilter === 'EN_CURSO' ? 'bg-green-600 dark:bg-green-400' : 'bg-slate-400 dark:bg-slate-500'}`}></div>
+                                        <div className={`w-2.5 h-2.5 lg:w-3 lg:h-3 rounded-full animate-pulse ${activeFilter === 'EN_CURSO' ? 'bg-white' : 'bg-green-500 dark:bg-green-400'}`}></div>
                                         <span className="whitespace-nowrap">En Curso</span>
+                                        {activeFilter === 'EN_CURSO' && <span className="font-black">✓</span>}
                                     </button>
 
                                     <button 
@@ -1640,14 +1659,15 @@ if (window.supabase) {
                                             trackAction('filters');
                                             logEvento('filtro_rapido', {estado:'por_empezar', activo: newState !== 'ALL'});
                                         }}
-                                        className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all shadow-sm border-2 lg:border-[3px] flex-1 ${
-                                            activeFilter === 'POR_EMPEZAR' 
-                                            ? 'bg-yellow-100 dark:bg-duoc-yellow/20 text-yellow-800 dark:text-duoc-yellow border-duoc-yellow' 
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all border-2 lg:border-[3px] flex-1 ${
+                                            activeFilter === 'POR_EMPEZAR'
+                                            ? 'bg-duoc-yellow text-yellow-900 border-yellow-500 dark:border-yellow-300 ring-2 ring-yellow-200 dark:ring-yellow-500/40 shadow-md'
+                                            : 'bg-yellow-50 dark:bg-duoc-yellow/10 text-yellow-800 dark:text-duoc-yellow border-yellow-400/70 dark:border-yellow-600/60 shadow-sm hover:bg-yellow-100 dark:hover:bg-duoc-yellow/20'
                                         }`}
                                     >
-                                        <div className={`w-2.5 h-2.5 lg:w-3 lg:h-3 rounded-full animate-pulse ${activeFilter === 'POR_EMPEZAR' ? 'bg-duoc-yellow' : 'bg-slate-400 dark:bg-slate-500'}`}></div>
+                                        <div className={`w-2.5 h-2.5 lg:w-3 lg:h-3 rounded-full animate-pulse ${activeFilter === 'POR_EMPEZAR' ? 'bg-yellow-900' : 'bg-duoc-yellow'}`}></div>
                                         <span className="whitespace-nowrap">Por Comenzar</span>
+                                        {activeFilter === 'POR_EMPEZAR' && <span className="font-black">✓</span>}
                                     </button>
 
                                     <button 
@@ -1658,14 +1678,15 @@ if (window.supabase) {
                                             trackAction('filters');
                                             logEvento('filtro_rapido', {estado:'por_finalizar', activo: newState !== 'ALL'});
                                         }}
-                                        className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all shadow-sm border-2 lg:border-[3px] flex-1 ${
-                                            activeFilter === 'POR_FINALIZAR' 
-                                            ? 'bg-blue-100 dark:bg-duoc-lightblue/30 text-duoc-lightblue dark:text-blue-300 border-duoc-lightblue' 
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-transparent hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-lg transition-all border-2 lg:border-[3px] flex-1 ${
+                                            activeFilter === 'POR_FINALIZAR'
+                                            ? 'bg-duoc-lightblue dark:bg-blue-500 text-white border-blue-600 dark:border-blue-300 ring-2 ring-blue-200 dark:ring-blue-500/40 shadow-md'
+                                            : 'bg-blue-50 dark:bg-duoc-lightblue/15 text-duoc-lightblue dark:text-blue-300 border-blue-300/70 dark:border-blue-700 shadow-sm hover:bg-blue-100 dark:hover:bg-duoc-lightblue/25'
                                         }`}
                                     >
-                                        <div className={`w-2.5 h-2.5 lg:w-3 lg:h-3 rounded-full animate-pulse ${activeFilter === 'POR_FINALIZAR' ? 'bg-duoc-lightblue dark:bg-blue-400' : 'bg-slate-400 dark:bg-slate-500'}`}></div>
+                                        <div className={`w-2.5 h-2.5 lg:w-3 lg:h-3 rounded-full animate-pulse ${activeFilter === 'POR_FINALIZAR' ? 'bg-white' : 'bg-duoc-lightblue dark:bg-blue-400'}`}></div>
                                         <span className="whitespace-nowrap">Por Finalizar</span>
+                                        {activeFilter === 'POR_FINALIZAR' && <span className="font-black">✓</span>}
                                     </button>
                                 </div>
 
