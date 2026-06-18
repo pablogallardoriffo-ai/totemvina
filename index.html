@@ -1214,7 +1214,7 @@ if (window.supabase) {
 
                 if (currentMins < startMins) {
                     if (diffStart <= 30 && diffStart > 0) {
-                        return { texto: '¡POR EMPEZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
+                        return { texto: '¡POR COMENZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
                     }
                     return { texto: 'POR COMENZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: false };
                 } else if (currentMins >= endMins) {
@@ -1276,7 +1276,7 @@ if (window.supabase) {
                 const diffStart = startMins - currentMins;
                 const diffEnd = endMins - currentMins;
                 if (currentMins < startMins) {
-                    if (diffStart <= 30) return { texto: '¡POR EMPEZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
+                    if (diffStart <= 30) return { texto: '¡POR COMENZAR!', desc: `en ${diffStart} min`, bg: 'bg-yellow-100 dark:bg-duoc-yellow/20', text: 'text-yellow-800 dark:text-duoc-yellow', border: 'border-duoc-yellow', isImportant: true };
                     return { texto: 'HOY · POR COMENZAR', bg: 'bg-blue-50 dark:bg-duoc-lightblue/20', text: 'text-duoc-lightblue dark:text-blue-300', border: 'border-blue-200 dark:border-blue-800', isImportant: true };
                 } else if (currentMins >= endMins) {
                     return { texto: 'REALIZADO', bg: 'bg-slate-100 dark:bg-slate-800', text: 'text-slate-500 dark:text-slate-500', border: 'border-slate-200 dark:border-slate-700', isImportant: false };
@@ -1303,7 +1303,7 @@ if (window.supabase) {
                     const matchActive = 
                         activeFilter === 'ALL' ? true :
                         activeFilter === 'EN_CURSO' ? (statusInfo.texto === 'EN CURSO' || statusInfo.texto === '¡POR FINALIZAR!') :
-                        activeFilter === 'POR_EMPEZAR' ? statusInfo.texto === '¡POR EMPEZAR!' :
+                        activeFilter === 'POR_EMPEZAR' ? statusInfo.texto === '¡POR COMENZAR!' :
                         activeFilter === 'POR_FINALIZAR' ? statusInfo.texto === '¡POR FINALIZAR!' : true;
 
                     return matchDia && matchJornada && matchEscuela && matchSigla && matchSearch && matchActive;
@@ -1313,7 +1313,7 @@ if (window.supabase) {
                     const statusB = getClaseStatus(b);
                     
                     const getPriority = (status) => {
-                        if (status.texto === 'EN CURSO' || status.texto === '¡POR EMPEZAR!' || status.texto === '¡POR FINALIZAR!') return 1;
+                        if (status.texto === 'EN CURSO' || status.texto === '¡POR COMENZAR!' || status.texto === '¡POR FINALIZAR!') return 1;
                         if (status.texto === 'REALIZADA') return 3;
                         return 2; 
                     };
@@ -1909,7 +1909,7 @@ if (window.supabase) {
                                                 {sortedFilteredData.map((clase, idx) => {
                                                     const status = getClaseStatus(clase);
                                                     const isEnCurso = status.texto === 'EN CURSO';
-                                                    const isPorEmpezar = status.texto === '¡POR EMPEZAR!';
+                                                    const isPorEmpezar = status.texto === '¡POR COMENZAR!';
                                                     const isPorTerminar = status.texto === '¡POR FINALIZAR!';
                                                     const highlight = isEnCurso || isPorEmpezar || isPorTerminar;
                                                     const sinRecinto = clase.sala === 'Sin recinto';
