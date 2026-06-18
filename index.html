@@ -86,7 +86,8 @@ if (window.supabase) {
             admin_sabana_sync: 'Sábana sincronizada', admin_sabana_descarga: 'Sábana descargada',
             admin_examenes_sync: 'Exámenes sincronizados', admin_examenes_descarga: 'Exámenes descargados',
             admin_examenes_eliminar: 'Exámenes eliminados', admin_examenes_inicio: 'Carga exámenes',
-            admin_examenes_plantilla: 'Plantilla descargada', admin_export_csv: 'Exportación CSV'
+            admin_examenes_plantilla: 'Plantilla descargada', admin_export_csv: 'Exportación CSV',
+            filtro_examen: 'Filtro de exámenes'
         };
 
         const Icons = {
@@ -263,6 +264,12 @@ if (window.supabase) {
             const [configSave, setConfigSave] = useState({ field: '', status: 'idle', msg: '' });
             const [examenSearch, setExamenSearch] = useState('');
             const [examenFechaFilter, setExamenFechaFilter] = useState('');
+            const [examenCarreraFilter, setExamenCarreraFilter] = useState('');
+            const [examenNivelFilter, setExamenNivelFilter] = useState('');
+            const [examenJornadaFilter, setExamenJornadaFilter] = useState('');
+            // Variantes de encabezado aceptadas para los campos clave de exámenes.
+            const EXAM_KEYS = { carrera: ['carrera', 'programa'], nivel: ['nivel', 'semestre'], jornada: ['jornada'] };
+            const getExamField = (ex, keys) => { for (const k of keys) if (ex && ex[k]) return String(ex[k]).trim(); return ''; };
 
             const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
             const todayName = diasSemana[filterTime.getDay()];
@@ -1320,6 +1327,18 @@ if (window.supabase) {
                 });
             }, [data, activeDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, todayName, filterTime]);
 
+            // Opciones disponibles para los filtros de la vista de exámenes (carrera/nivel/jornada).
+            const examenOpciones = useMemo(() => {
+                const c = new Set(), n = new Set(), j = new Set();
+                examenes.forEach(ex => {
+                    const cv = getExamField(ex, EXAM_KEYS.carrera); if (cv) c.add(cv);
+                    const nv = getExamField(ex, EXAM_KEYS.nivel); if (nv) n.add(nv);
+                    const jv = getExamField(ex, EXAM_KEYS.jornada); if (jv) j.add(jv);
+                });
+                const ordNum = (a, b) => { const na = parseFloat(a), nb = parseFloat(b); if (!isNaN(na) && !isNaN(nb)) return na - nb; return String(a).localeCompare(String(b)); };
+                return { carreras: [...c].sort((a, b) => a.localeCompare(b)), niveles: [...n].sort(ordNum), jornadas: [...j].sort((a, b) => a.localeCompare(b)) };
+            }, [examenes]);
+
             const handleSurveySubmit = async () => {
                 const newSurvey = {
                     ...surveyData,
@@ -1605,15 +1624,15 @@ if (window.supabase) {
             // Genera y descarga una plantilla Excel con la estructura de columnas para cargar exámenes
             const descargarPlantillaExamenes = () => {
                 try {
-                    const headers = ['Fecha', 'Hora Inicio', 'Hora Fin', 'Sigla', 'Asignatura', 'Docente', 'Inscritos', 'Sala'];
+                    const headers = ['Fecha', 'Hora Inicio', 'Hora Fin', 'Carrera', 'Nivel', 'Jornada', 'Sigla', 'Asignatura', 'Docente', 'Inscritos', 'Sala'];
                     const ejemplos = [
-                        ['2026-07-15', '08:30', '10:30', 'GAA1101-013D', 'HERRAMIENTAS TECNOLÓGICAS I', 'ERVIO MARCELO ZAVALA', 38, 'LC606'],
-                        ['2026-07-15', '11:00', '13:00', 'MAT1180-007D', 'CÁLCULO I', 'PAOLA ANDREA RIVERA', 42, 'L302'],
-                        ['2026-07-16', '14:00', '16:00', 'PRG2201-004V', 'PROGRAMACIÓN AVANZADA', 'CARLOS MUÑOZ SOTO', 30, 'LAB-INF-2']
+                        ['2026-07-15', '08:30', '10:30', 'Ingeniería en Informática', '1', 'Diurna', 'GAA1101-013D', 'HERRAMIENTAS TECNOLÓGICAS I', 'ERVIO MARCELO ZAVALA', 38, 'LC606'],
+                        ['2026-07-15', '11:00', '13:00', 'Ingeniería en Informática', '1', 'Diurna', 'MAT1180-007D', 'CÁLCULO I', 'PAOLA ANDREA RIVERA', 42, 'L302'],
+                        ['2026-07-16', '14:00', '16:00', 'Ingeniería en Informática', '3', 'Vespertina', 'PRG2201-004V', 'PROGRAMACIÓN AVANZADA', 'CARLOS MUÑOZ SOTO', 30, 'LAB-INF-2']
                     ];
                     const aoa = [headers, ...ejemplos];
                     const ws = XLSX.utils.aoa_to_sheet(aoa);
-                    ws['!cols'] = [14, 12, 11, 16, 38, 30, 11, 14].map(wch => ({ wch }));
+                    ws['!cols'] = [14, 12, 11, 28, 8, 13, 16, 38, 30, 11, 14].map(wch => ({ wch }));
                     const wb = XLSX.utils.book_new();
                     XLSX.utils.book_append_sheet(wb, ws, 'Exámenes');
                     XLSX.writeFile(wb, 'Plantilla_Examenes_Totem.xlsx');
@@ -1991,8 +2010,8 @@ if (window.supabase) {
                             {vistaPublica === 'EXAMENES' && (
                                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
                                     {/* Barra de búsqueda y filtros de exámenes */}
-                                    <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col sm:flex-row gap-3 shadow-sm transition-colors duration-300">
-                                        <div className="relative flex-1">
+                                    <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-3 shadow-sm transition-colors duration-300">
+                                        <div className="relative flex-1 lg:min-w-[260px]">
                                             <Icons.Search cls="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 lg:w-6 lg:h-6 text-slate-400 dark:text-slate-500" />
                                             <input
                                                 type="text"
@@ -2003,15 +2022,35 @@ if (window.supabase) {
                                             />
                                             {examenSearch && <button onClick={() => setExamenSearch('')} className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-200 dark:bg-slate-700 rounded-full p-1 text-slate-500 hover:bg-slate-300"><Icons.X cls="w-4 h-4" /></button>}
                                         </div>
-                                        {(() => {
-                                            const fechas = [...new Set(examenes.map(e => e.fecha || e.fecha_examen || e.fecha_de_examen || e.date || '').filter(Boolean))].sort();
-                                            return fechas.length > 0 ? (
-                                                <select value={examenFechaFilter} onChange={e => { setExamenFechaFilter(e.target.value); trackAction('filters'); }} className="min-w-[160px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-lg font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer transition-colors">
-                                                    <option value="">Todas las fechas</option>
-                                                    {fechas.map(f => <option key={f} value={f}>{f}</option>)}
+                                        <div className="flex flex-wrap gap-2 lg:gap-3">
+                                            {examenOpciones.carreras.length > 0 && (
+                                                <select value={examenCarreraFilter} onChange={e => { setExamenCarreraFilter(e.target.value); trackAction('filters'); logEvento('filtro_examen', {campo:'carrera', valor: e.target.value || 'todas'}); }} className="flex-1 min-w-[150px] max-w-[260px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-base font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer truncate transition-colors">
+                                                    <option value="">Carrera (Todas)</option>
+                                                    {examenOpciones.carreras.map(c => <option key={c} value={c}>{c}</option>)}
                                                 </select>
-                                            ) : null;
-                                        })()}
+                                            )}
+                                            {examenOpciones.niveles.length > 0 && (
+                                                <select value={examenNivelFilter} onChange={e => { setExamenNivelFilter(e.target.value); trackAction('filters'); logEvento('filtro_examen', {campo:'nivel', valor: e.target.value || 'todos'}); }} className="flex-1 min-w-[120px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-base font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer transition-colors">
+                                                    <option value="">Nivel (Todos)</option>
+                                                    {examenOpciones.niveles.map(n => <option key={n} value={n}>{/^\d+$/.test(n) ? `Nivel ${n}` : n}</option>)}
+                                                </select>
+                                            )}
+                                            {examenOpciones.jornadas.length > 0 && (
+                                                <select value={examenJornadaFilter} onChange={e => { setExamenJornadaFilter(e.target.value); trackAction('filters'); logEvento('filtro_examen', {campo:'jornada', valor: e.target.value || 'todas'}); }} className="flex-1 min-w-[130px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-base font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer transition-colors">
+                                                    <option value="">Jornada (Todas)</option>
+                                                    {examenOpciones.jornadas.map(j => <option key={j} value={j}>{j}</option>)}
+                                                </select>
+                                            )}
+                                            {(() => {
+                                                const fechas = [...new Set(examenes.map(e => e.fecha || e.fecha_examen || e.fecha_de_examen || e.date || '').filter(Boolean))].sort();
+                                                return fechas.length > 0 ? (
+                                                    <select value={examenFechaFilter} onChange={e => { setExamenFechaFilter(e.target.value); trackAction('filters'); }} className="flex-1 min-w-[150px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-base font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer transition-colors">
+                                                        <option value="">Todas las fechas</option>
+                                                        {fechas.map(f => <option key={f} value={f}>{f}</option>)}
+                                                    </select>
+                                                ) : null;
+                                            })()}
+                                        </div>
                                     </div>
 
                                     {/* Lista de exámenes */}
@@ -2029,7 +2068,10 @@ if (window.supabase) {
                                                 const passSearch = !term || vals.includes(term);
                                                 const fechaKey = Object.keys(ex).find(k => k === 'fecha' || k === 'fecha_examen' || k === 'fecha_de_examen' || k === 'date' || k.includes('fecha'));
                                                 const passDate = !examenFechaFilter || (fechaKey && ex[fechaKey] === examenFechaFilter);
-                                                return passSearch && passDate;
+                                                const passCarrera = !examenCarreraFilter || getExamField(ex, EXAM_KEYS.carrera) === examenCarreraFilter;
+                                                const passNivel = !examenNivelFilter || getExamField(ex, EXAM_KEYS.nivel) === examenNivelFilter;
+                                                const passJornada = !examenJornadaFilter || getExamField(ex, EXAM_KEYS.jornada) === examenJornadaFilter;
+                                                return passSearch && passDate && passCarrera && passNivel && passJornada;
                                             }).sort((a, b) => {
                                                 const fa = parseExamenFecha(a.fecha || a.fecha_examen || a.fecha_de_examen || a.date || '');
                                                 const fb = parseExamenFecha(b.fecha || b.fecha_examen || b.fecha_de_examen || b.date || '');
@@ -2040,12 +2082,12 @@ if (window.supabase) {
                                                 const hb = formatExcelTime(b.hora_inicio || b.horainicio || b.hora || '');
                                                 return ha.localeCompare(hb);
                                             });
-                                            const KNOWN = { asignatura:true, ramo:true, nombre:true, nombre_asignatura:true, seccion:true, sigla:true, codigo:true, seccion_id:true, docente:true, profesor:true, sala:true, recinto:true, sala_examen:true, escuela:true, carrera:true, programa:true, jornada:true, fecha:true, fecha_examen:true, fecha_de_examen:true, date:true, hora:true, hora_inicio:true, horaInicio:true, hora_inicio_examen:true, hora_fin:true, horaFin:true, hora_fin_examen:true, alumnos:true, inscritos:true, matriculados:true };
+                                            const KNOWN = { asignatura:true, ramo:true, nombre:true, nombre_asignatura:true, seccion:true, sigla:true, codigo:true, seccion_id:true, docente:true, profesor:true, sala:true, recinto:true, sala_examen:true, escuela:true, carrera:true, programa:true, jornada:true, nivel:true, semestre:true, fecha:true, fecha_examen:true, fecha_de_examen:true, date:true, hora:true, hora_inicio:true, horaInicio:true, hora_inicio_examen:true, hora_fin:true, horaFin:true, hora_fin_examen:true, alumnos:true, inscritos:true, matriculados:true };
                                             const getF = (ex, ...keys) => { for (const k of keys) if (ex[k]) return ex[k]; return ''; };
                                             return filtered.length === 0 ? (
                                                 <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-3">
                                                     <Icons.Search cls="w-14 h-14 text-slate-200 dark:text-slate-700" />
-                                                    <p className="text-lg font-bold text-slate-400 dark:text-slate-500">Sin resultados para "{examenSearch || examenFechaFilter}"</p>
+                                                    <p className="text-lg font-bold text-slate-400 dark:text-slate-500">Sin exámenes para los filtros aplicados</p>
                                                 </div>
                                             ) : (
                                                 <div className="flex-1 overflow-y-auto custom-scrollbar">
@@ -2059,7 +2101,10 @@ if (window.supabase) {
                                                             const fecha = getF(ex, 'fecha', 'fecha_examen', 'fecha_de_examen', 'date');
                                                             const horaI = getF(ex, 'hora_inicio', 'horaInicio', 'hora_inicio_examen', 'hora');
                                                             const horaF = getF(ex, 'hora_fin', 'horaFin', 'hora_fin_examen');
-                                                            const escuela = getF(ex, 'escuela', 'carrera', 'programa');
+                                                            const carrera = getF(ex, 'carrera', 'programa');
+                                                            const nivel = getF(ex, 'nivel', 'semestre');
+                                                            const jornada = getF(ex, 'jornada');
+                                                            const escuela = getF(ex, 'escuela');
                                                             const alumnos = getF(ex, 'alumnos', 'inscritos', 'matriculados');
                                                             const estado = getExamenStatus(ex);
                                                             const extras = Object.entries(ex).filter(([k]) => !k.startsWith('_label_') && !KNOWN[k] && ex[k]);
@@ -2085,6 +2130,13 @@ if (window.supabase) {
                                                                     )}
                                                                     {/* Body */}
                                                                     <div className="px-4 py-3 lg:px-5 lg:py-4 flex flex-col gap-2">
+                                                                        {(carrera || nivel || jornada) && (
+                                                                            <div className="flex flex-wrap gap-1.5 mb-0.5">
+                                                                                {carrera && <span className="inline-flex items-center gap-1 text-[11px] lg:text-xs font-bold bg-duoc-blue/10 dark:bg-slate-800 text-duoc-blue dark:text-slate-200 px-2.5 py-1 rounded-lg"><Icons.Building cls="w-3.5 h-3.5 shrink-0" />{carrera}</span>}
+                                                                                {nivel && <span className="text-[11px] lg:text-xs font-black bg-duoc-yellow/25 text-duoc-blue dark:text-duoc-yellow px-2.5 py-1 rounded-lg">{/^\d+$/.test(nivel) ? `Nivel ${nivel}` : nivel}</span>}
+                                                                                {jornada && <span className="text-[11px] lg:text-xs font-bold bg-duoc-lightblue/15 text-duoc-lightblue dark:text-blue-300 px-2.5 py-1 rounded-lg">{jornada}</span>}
+                                                                            </div>
+                                                                        )}
                                                                         {(fecha || horaI) && (
                                                                             <div className="flex items-center gap-2 text-sm lg:text-base font-bold text-slate-700 dark:text-slate-300">
                                                                                 <Icons.CalendarDays cls="w-4 h-4 text-duoc-yellow shrink-0" />
@@ -2578,14 +2630,14 @@ if (window.supabase) {
                                             <p className="text-base lg:text-xl text-slate-500 dark:text-slate-400 mb-6 lg:mb-8 max-w-2xl mx-auto">Carga el Excel de programación de exámenes. La primera fila debe contener los encabezados. Al subirlo, <span className="font-bold text-duoc-blue dark:text-duoc-yellow">se muestra a todos los estudiantes en el tótem automáticamente.</span></p>
                                             <label className="cursor-pointer inline-flex flex-col items-center justify-center border-2 lg:border-4 border-dashed border-yellow-200 dark:border-slate-600 bg-yellow-50/50 dark:bg-slate-800/50 hover:bg-yellow-50 dark:hover:bg-slate-800 transition-colors py-6 px-10 lg:py-10 lg:px-24 rounded-2xl lg:rounded-3xl mx-auto w-full lg:w-auto">
                                                 <span className="text-lg lg:text-2xl font-bold text-duoc-blue dark:text-slate-200 mb-1 lg:mb-2">Seleccionar Archivo .XLSX</span>
-                                                <span className="text-sm lg:text-lg text-slate-400 font-medium">Primera fila = encabezados (Asignatura, Fecha, Hora, Sala…)</span>
+                                                <span className="text-sm lg:text-lg text-slate-400 font-medium">Primera fila = encabezados (Carrera, Nivel, Jornada, Asignatura, Fecha, Hora, Sala…)</span>
                                                 <input type="file" accept=".xlsx, .xls, .csv" onChange={handleExamenesUpload} className="hidden" />
                                             </label>
                                             <div className="mt-5 lg:mt-6 flex flex-col items-center gap-2">
                                                 <button onClick={descargarPlantillaExamenes} className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-slate-100 dark:bg-slate-800 text-duoc-blue dark:text-duoc-yellow border-2 border-slate-200 dark:border-slate-700 rounded-xl font-black text-base lg:text-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
                                                     <Icons.Download cls="w-5 h-5" /> Descargar plantilla Excel
                                                 </button>
-                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 max-w-xl">Columnas: <span className="font-semibold text-slate-500 dark:text-slate-400">Fecha · Hora Inicio · Hora Fin · Sigla · Asignatura · Docente · Inscritos · Sala</span>. Incluye ejemplos; reemplázalos por tus exámenes y súbela.</p>
+                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 max-w-xl">Columnas: <span className="font-semibold text-slate-500 dark:text-slate-400">Fecha · Hora Inicio · Hora Fin · Carrera · Nivel · Jornada · Sigla · Asignatura · Docente · Inscritos · Sala</span>. Los estudiantes podrán filtrar por carrera, nivel y jornada. Incluye ejemplos; reemplázalos por tus exámenes y súbela.</p>
                                             </div>
                                             {examenesInfo.status === 'subiendo' && (
                                                 <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-duoc-lightblue dark:text-blue-300 animate-pulse">
