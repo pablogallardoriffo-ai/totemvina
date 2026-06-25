@@ -87,7 +87,7 @@ if (window.supabase) {
             admin_examenes_sync: 'Exámenes sincronizados', admin_examenes_descarga: 'Exámenes descargados',
             admin_examenes_eliminar: 'Exámenes eliminados', admin_examenes_inicio: 'Carga exámenes',
             admin_examenes_plantilla: 'Plantilla descargada', admin_export_csv: 'Exportación CSV',
-            filtro_examen: 'Filtro de exámenes', admin_barra_info: 'Barra informativa'
+            filtro_examen: 'Filtro de exámenes', admin_barra_info: 'Barra informativa', admin_suspension_seg: 'Tiempo de suspensión'
         };
 
         // Barra informativa configurable del encabezado del tótem.
@@ -234,7 +234,7 @@ if (window.supabase) {
         };
 
         // Barra informativa rotativa del encabezado del tótem (solo vista pública).
-        const InfoBar = ({ barra, isDarkMode }) => {
+        const InfoBar = ({ barra, isDarkMode, transparent }) => {
             const activos = (barra && Array.isArray(barra.mensajes) ? barra.mensajes : [])
                 .filter(m => m && m.activo && m.texto && m.texto.trim());
             const [idx, setIdx] = useState(0);
@@ -249,7 +249,7 @@ if (window.supabase) {
             if (!barra || !barra.visible || activos.length === 0) return null;
             const actual = activos[Math.min(idx, activos.length - 1)];
             return (
-                <div className={`shrink-0 w-full px-4 lg:px-10 pb-3 lg:pb-4 z-10 ${isDarkMode ? 'bg-duoc-darker' : 'bg-[#00274c]'}`}>
+                <div className={`shrink-0 w-full px-4 lg:px-10 pb-3 lg:pb-4 z-10 ${transparent ? 'pt-3 lg:pt-4' : (isDarkMode ? 'bg-duoc-darker' : 'bg-[#00274c]')}`}>
                     <div className="flex items-center gap-3 lg:gap-4 bg-duoc-yellow/15 border border-duoc-yellow/30 rounded-xl lg:rounded-2xl px-4 py-2.5 lg:px-6 lg:py-3">
                         <Icons.Megaphone cls="w-5 h-5 lg:w-7 lg:h-7 text-duoc-yellow shrink-0" />
                         <span key={idx} className="flex-1 min-w-0 text-white font-semibold text-sm lg:text-2xl leading-snug animate-fade-in">{actual.texto}</span>
@@ -325,6 +325,10 @@ if (window.supabase) {
             const [barraInfo, setBarraInfo] = useState(BARRA_INFO_DEFAULT);
             const [barraDraft, setBarraDraft] = useState(BARRA_INFO_DEFAULT);
             useEffect(() => { setBarraDraft(barraInfo); }, [barraInfo]);
+            // Segundos de inactividad antes de entrar en modo suspensión (configurable desde admin).
+            const [suspensionSeg, setSuspensionSeg] = useState(30);
+            const [suspensionDraft, setSuspensionDraft] = useState('30');
+            useEffect(() => { setSuspensionDraft(String(suspensionSeg)); }, [suspensionSeg]);
             const [examenSearch, setExamenSearch] = useState('');
             const [examenFechaFilter, setExamenFechaFilter] = useState('');
             const [examenCarreraFilter, setExamenCarreraFilter] = useState('');
@@ -624,7 +628,7 @@ if (window.supabase) {
                         setShowQrModal(false);
                         setEmailModal({ show: false, target: '', status: 'idle', errorMsg: '' });
                         setPasswordInput('');
-                    }, 30000); // 30 Segundos
+                    }, Math.min(1800, Math.max(10, suspensionSeg)) * 1000);
                 };
 
                 checkInactivity();
@@ -647,7 +651,7 @@ if (window.supabase) {
                     window.removeEventListener('touchstart', resetTimer);
                     window.removeEventListener('click', resetTimer);
                 };
-            }, [activeTab, showPasswordModal, showSurveyModal, showQrModal, emailModal.show, kioskLocked]);
+            }, [activeTab, showPasswordModal, showSurveyModal, showQrModal, emailModal.show, kioskLocked, suspensionSeg]);
 
             useEffect(() => {
                 let scrollInterval;
@@ -707,6 +711,8 @@ if (window.supabase) {
                     if (cachedTitulo) setTituloTotem(cachedTitulo);
                     const cachedBarra = safeStorage.getItem('totem_barra_info');
                     if (cachedBarra) { try { setBarraInfo(normalizarBarraInfo(JSON.parse(cachedBarra))); } catch (e) {} }
+                    const cachedSusp = safeStorage.getItem('totem_suspension_seg');
+                    if (cachedSusp) { const n = parseInt(cachedSusp, 10); if (!isNaN(n)) setSuspensionSeg(Math.min(1800, Math.max(10, n))); }
                     if (window._sb) {
                         let cargado = false;
                         // 1) Sábana subida desde el panel (fuente de verdad para todos los dispositivos)
@@ -769,6 +775,7 @@ if (window.supabase) {
                                 if (cfgMap.vista_publica) { setVistaPublica(cfgMap.vista_publica); safeStorage.setItem('totem_vista_publica', cfgMap.vista_publica); }
                                 if (cfgMap.titulo_totem) { setTituloTotem(cfgMap.titulo_totem); safeStorage.setItem('totem_titulo', cfgMap.titulo_totem); }
                                 if (cfgMap.barra_info) { try { setBarraInfo(normalizarBarraInfo(JSON.parse(cfgMap.barra_info))); safeStorage.setItem('totem_barra_info', cfgMap.barra_info); } catch (e) {} }
+                                if (cfgMap.suspension_seg) { const n = parseInt(cfgMap.suspension_seg, 10); if (!isNaN(n)) { setSuspensionSeg(Math.min(1800, Math.max(10, n))); safeStorage.setItem('totem_suspension_seg', String(n)); } }
                             }
                         } catch(e) {}
                         // Cargar exámenes desde el servidor
@@ -906,6 +913,7 @@ if (window.supabase) {
                                     if (cfgMap.vista_publica) { setVistaPublica(cfgMap.vista_publica); safeStorage.setItem('totem_vista_publica', cfgMap.vista_publica); }
                                     if (cfgMap.titulo_totem) { setTituloTotem(cfgMap.titulo_totem); safeStorage.setItem('totem_titulo', cfgMap.titulo_totem); }
                                     if (cfgMap.barra_info) { try { setBarraInfo(normalizarBarraInfo(JSON.parse(cfgMap.barra_info))); safeStorage.setItem('totem_barra_info', cfgMap.barra_info); } catch (e) {} }
+                                    if (cfgMap.suspension_seg) { const n = parseInt(cfgMap.suspension_seg, 10); if (!isNaN(n)) { setSuspensionSeg(Math.min(1800, Math.max(10, n))); safeStorage.setItem('totem_suspension_seg', String(n)); } }
                                 }
                             } catch (e) {}
                         }
@@ -1720,6 +1728,25 @@ if (window.supabase) {
                 }
             };
 
+            // Guarda los segundos de inactividad antes de entrar en modo suspensión.
+            const guardarSuspension = async () => {
+                const n = parseInt(suspensionDraft, 10);
+                if (isNaN(n) || n < 10 || n > 1800) {
+                    setConfigSave({ field: 'suspension', status: 'error', msg: 'Ingresa un número entre 10 y 1800 segundos.' });
+                    return;
+                }
+                setConfigSave({ field: 'suspension', status: 'saving', msg: '' });
+                setSuspensionSeg(n);
+                safeStorage.setItem('totem_suspension_seg', String(n));
+                try {
+                    await guardarConfig('suspension_seg', String(n));
+                    logEvento('admin_suspension_seg', { segundos: n });
+                    setConfigSave({ field: 'suspension', status: 'success', msg: '✓ Tiempo de suspensión actualizado en todos los tótems.' });
+                } catch (e) {
+                    setConfigSave({ field: 'suspension', status: 'error', msg: 'Se aplicó aquí, pero falló la sincronización. Revisa la conexión.' });
+                }
+            };
+
             // Genera y descarga una plantilla Excel con la estructura de columnas para cargar exámenes
             const descargarPlantillaExamenes = () => {
                 try {
@@ -1795,6 +1822,8 @@ if (window.supabase) {
                                 </div>
                             </div>
                         </header>
+
+                        <InfoBar barra={barraInfo} isDarkMode={isDarkMode} transparent />
 
                         <div className="hidden lg:flex text-blue-200 dark:text-slate-400 bg-black/30 px-12 py-4 shrink-0 text-lg font-black uppercase tracking-widest border-b border-white/5 shadow-md z-10">
                             <div className="w-44 shrink-0">Horario</div>
@@ -2653,6 +2682,28 @@ if (window.supabase) {
                                                     </button>
                                                 </div>
                                                 {configSave.field === 'titulo' && configSave.status !== 'idle' && (
+                                                    <div className="text-sm lg:text-base font-semibold mt-3 min-h-[1.25rem]">
+                                                        {configSave.status === 'success' && <span className="text-green-600 dark:text-green-400">{configSave.msg}</span>}
+                                                        {configSave.status === 'error' && <span className="text-amber-500 dark:text-amber-400">{configSave.msg}</span>}
+                                                        {configSave.status === 'saving' && <span className="text-slate-400">Guardando…</span>}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Tiempo para entrar en modo suspensión */}
+                                            <div className="border-t border-slate-100 dark:border-slate-700 pt-5 lg:pt-6 mt-5 lg:mt-6">
+                                                <label className="block text-sm lg:text-base font-bold text-duoc-blue dark:text-white mb-1">Modo suspensión</label>
+                                                <p className="text-xs lg:text-sm text-slate-400 dark:text-slate-500 mb-3">Segundos de inactividad antes de mostrar la pantalla de descanso (entre 10 y 1800). Solo aplica en pantallas de escritorio.</p>
+                                                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <input type="number" min={10} max={1800} value={suspensionDraft} onChange={e => { setSuspensionDraft(e.target.value); setConfigSave({ field: 'suspension', status: 'idle', msg: '' }); }} onKeyDown={e => e.key === 'Enter' && guardarSuspension()} className="w-28 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-base font-bold outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow dark:text-white" />
+                                                        <span className="text-sm text-slate-500 dark:text-slate-400">segundos</span>
+                                                    </div>
+                                                    <button onClick={guardarSuspension} disabled={configSave.field === 'suspension' && configSave.status === 'saving'} className="shrink-0 flex items-center justify-center gap-2 px-6 py-3 bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl font-black text-base lg:text-lg hover:opacity-90 transition-opacity shadow-md disabled:opacity-50">
+                                                        <Icons.Check cls="w-5 h-5" /> Guardar tiempo
+                                                    </button>
+                                                </div>
+                                                {configSave.field === 'suspension' && configSave.status !== 'idle' && (
                                                     <div className="text-sm lg:text-base font-semibold mt-3 min-h-[1.25rem]">
                                                         {configSave.status === 'success' && <span className="text-green-600 dark:text-green-400">{configSave.msg}</span>}
                                                         {configSave.status === 'error' && <span className="text-amber-500 dark:text-amber-400">{configSave.msg}</span>}
