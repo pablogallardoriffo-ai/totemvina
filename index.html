@@ -334,6 +334,8 @@ if (window.supabase) {
             useEffect(() => { setSuspensionDraft(String(suspensionSeg)); }, [suspensionSeg]);
             const [examenSearch, setExamenSearch] = useState('');
             const [examenFechaFilter, setExamenFechaFilter] = useState('');
+            // Filtro rápido por estado en la vista de exámenes (ALL / EN_CURSO / POR_EMPEZAR / POR_FINALIZAR)
+            const [examenFilter, setExamenFilter] = useState('ALL');
             const [examenCarreraFilter, setExamenCarreraFilter] = useState('');
             const [examenNivelFilter, setExamenNivelFilter] = useState('');
             const [examenJornadaFilter, setExamenJornadaFilter] = useState('');
@@ -2189,6 +2191,27 @@ if (window.supabase) {
                                 <div className="flex-1 min-h-0 flex flex-col overflow-hidden animate-fade-in">
                                     {/* Barra de búsqueda y filtros de exámenes */}
                                     <div className="bg-white dark:bg-duoc-card border-b border-slate-200 dark:border-slate-800 px-4 py-3 lg:px-8 lg:py-4 shrink-0 flex flex-col lg:flex-row lg:flex-wrap lg:items-center gap-3 shadow-sm transition-colors duration-300">
+                                        {/* Filtros rápidos por estado (semáforo) */}
+                                        <div className="flex gap-2 shrink-0 w-full lg:w-auto">
+                                            <button onClick={() => { setExamenFilter(f => f === 'EN_CURSO' ? 'ALL' : 'EN_CURSO'); trackAction('filters'); logEvento('filtro_examen', {campo:'estado', valor:'en_curso'}); }}
+                                                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-base transition-all border-2 flex-1 lg:flex-none ${examenFilter === 'EN_CURSO' ? 'bg-green-500 dark:bg-green-600 text-white border-green-600 dark:border-green-400 ring-2 ring-green-300 dark:ring-green-500/40 shadow-md' : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border-green-400/70 dark:border-green-700 shadow-sm hover:bg-green-100 dark:hover:bg-green-900/40'}`}>
+                                                <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${examenFilter === 'EN_CURSO' ? 'bg-white' : 'bg-green-500 dark:bg-green-400'}`}></div>
+                                                <span className="whitespace-nowrap">En Curso</span>
+                                                {examenFilter === 'EN_CURSO' && <span className="font-black">✓</span>}
+                                            </button>
+                                            <button onClick={() => { setExamenFilter(f => f === 'POR_EMPEZAR' ? 'ALL' : 'POR_EMPEZAR'); trackAction('filters'); logEvento('filtro_examen', {campo:'estado', valor:'por_comenzar'}); }}
+                                                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-base transition-all border-2 flex-1 lg:flex-none ${examenFilter === 'POR_EMPEZAR' ? 'bg-duoc-yellow text-yellow-900 border-yellow-500 dark:border-yellow-300 ring-2 ring-yellow-200 dark:ring-yellow-500/40 shadow-md' : 'bg-yellow-50 dark:bg-duoc-yellow/10 text-yellow-800 dark:text-duoc-yellow border-yellow-400/70 dark:border-yellow-600/60 shadow-sm hover:bg-yellow-100 dark:hover:bg-duoc-yellow/20'}`}>
+                                                <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${examenFilter === 'POR_EMPEZAR' ? 'bg-yellow-900' : 'bg-duoc-yellow'}`}></div>
+                                                <span className="whitespace-nowrap">Por Comenzar</span>
+                                                {examenFilter === 'POR_EMPEZAR' && <span className="font-black">✓</span>}
+                                            </button>
+                                            <button onClick={() => { setExamenFilter(f => f === 'POR_FINALIZAR' ? 'ALL' : 'POR_FINALIZAR'); trackAction('filters'); logEvento('filtro_examen', {campo:'estado', valor:'por_finalizar'}); }}
+                                                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 lg:px-4 lg:py-3 rounded-xl lg:rounded-2xl font-bold text-sm lg:text-base transition-all border-2 flex-1 lg:flex-none ${examenFilter === 'POR_FINALIZAR' ? 'bg-duoc-lightblue dark:bg-blue-500 text-white border-blue-600 dark:border-blue-300 ring-2 ring-blue-200 dark:ring-blue-500/40 shadow-md' : 'bg-blue-50 dark:bg-duoc-lightblue/15 text-duoc-lightblue dark:text-blue-300 border-blue-300/70 dark:border-blue-700 shadow-sm hover:bg-blue-100 dark:hover:bg-duoc-lightblue/25'}`}>
+                                                <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${examenFilter === 'POR_FINALIZAR' ? 'bg-white' : 'bg-duoc-lightblue dark:bg-blue-400'}`}></div>
+                                                <span className="whitespace-nowrap">Por Finalizar</span>
+                                                {examenFilter === 'POR_FINALIZAR' && <span className="font-black">✓</span>}
+                                            </button>
+                                        </div>
                                         <div className="relative flex-1 lg:min-w-[260px]">
                                             <Icons.Search cls="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 lg:w-6 lg:h-6 text-slate-400 dark:text-slate-500" />
                                             <input
@@ -2249,7 +2272,13 @@ if (window.supabase) {
                                                 const passCarrera = !examenCarreraFilter || getExamField(ex, EXAM_KEYS.carrera) === examenCarreraFilter;
                                                 const passNivel = !examenNivelFilter || getExamField(ex, EXAM_KEYS.nivel) === examenNivelFilter;
                                                 const passJornada = !examenJornadaFilter || getExamField(ex, EXAM_KEYS.jornada) === examenJornadaFilter;
-                                                return passSearch && passDate && passCarrera && passNivel && passJornada;
+                                                const txtEstado = (() => { const e = getExamenStatus(ex); return e ? e.texto : ''; })();
+                                                const passEstado =
+                                                    examenFilter === 'ALL' ? true :
+                                                    examenFilter === 'EN_CURSO' ? txtEstado === 'EN CURSO' :
+                                                    examenFilter === 'POR_EMPEZAR' ? (txtEstado === '¡POR COMENZAR!' || txtEstado === 'HOY · POR COMENZAR' || txtEstado === 'HOY') :
+                                                    examenFilter === 'POR_FINALIZAR' ? txtEstado === '¡POR FINALIZAR!' : true;
+                                                return passSearch && passDate && passCarrera && passNivel && passJornada && passEstado;
                                             }).sort((a, b) => {
                                                 const fa = parseExamenFecha(a.fecha || a.fecha_examen || a.fecha_de_examen || a.date || '');
                                                 const fb = parseExamenFecha(b.fecha || b.fecha_examen || b.fecha_de_examen || b.date || '');
