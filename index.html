@@ -2243,11 +2243,12 @@ if (window.supabase) {
                                                 </select>
                                             )}
                                             {(() => {
-                                                const fechas = [...new Set(examenes.map(e => e.fecha || e.fecha_examen || e.fecha_de_examen || e.date || '').filter(Boolean))].sort();
+                                                const fechas = [...new Set(examenes.map(e => e.fecha || e.fecha_examen || e.fecha_de_examen || e.date || '').filter(Boolean))]
+                                                    .sort((a, b) => { const da = parseExamenFecha(a), db = parseExamenFecha(b); if (da && db) return da - db; return String(a).localeCompare(String(b)); });
                                                 return fechas.length > 0 ? (
                                                     <select value={examenFechaFilter} onChange={e => { setExamenFechaFilter(e.target.value); trackAction('filters'); }} className="flex-1 min-w-[150px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-duoc-blue dark:text-slate-200 text-sm lg:text-base font-bold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-yellow cursor-pointer transition-colors">
                                                         <option value="">Todas las fechas</option>
-                                                        {fechas.map(f => <option key={f} value={f}>{f}</option>)}
+                                                        {fechas.map(f => <option key={f} value={f}>{fmtFechaExamen(f)}</option>)}
                                                     </select>
                                                 ) : null;
                                             })()}
