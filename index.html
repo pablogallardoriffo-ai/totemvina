@@ -1080,20 +1080,23 @@ if (window.supabase) {
 
             const processExamenes = (rows) => {
                 if (rows.length < 2) return null;
+                // Elimina bytes NUL y caracteres de control (excepto tab/salto de línea) que Postgres
+                // rechaza al guardar en jsonb. Vienen a veces en Excel exportados de otros sistemas.
+                const limpiarTexto = (s) => String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim();
                 const rawHeaders = rows[0];
-                const headers = rawHeaders.map((h, _i) => String(h || '').trim()
+                const headers = rawHeaders.map((h, _i) => limpiarTexto(h)
                     .toLowerCase()
                     .replace(/\s+/g, '_')
                     .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i').replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n')
                     .replace(/[^a-z0-9_]/g, '') || `col${_i}`
                 );
-                const originalHeaders = rawHeaders.map(h => String(h || '').trim());
+                const originalHeaders = rawHeaders.map(h => limpiarTexto(h));
                 const exams = [];
                 rows.slice(1).forEach(row => {
                     const obj = {};
                     let hasValue = false;
                     headers.forEach((h, i) => {
-                        const val = String(row[i] !== undefined ? row[i] : '').trim();
+                        const val = limpiarTexto(row[i] !== undefined ? row[i] : '');
                         if (h && val !== '') { obj[h] = val; obj[`_label_${h}`] = originalHeaders[i]; hasValue = true; }
                     });
                     if (hasValue) exams.push(obj);
@@ -1112,17 +1115,31 @@ if (window.supabase) {
                     return;
                 }
                 setExamenesInfo({ status: 'subiendo', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                // El tótem solo necesita 'data' para mostrar los exámenes; 'archivo_base64' es únicamente
+                // para poder re-descargar el Excel original. Si el archivo es muy grande, el request supera
+                // el límite de tamaño del servidor, así que en ese caso subimos solo los datos (lo esencial).
+                const MAX_BASE64 = 3000000; // ~3 MB
+                const incluirArchivoInicial = !!base64 && base64.length <= MAX_BASE64;
+                const fila = (conArchivo) => ({
+                    id: 1, data: datos,
+                    archivo_base64: conArchivo ? base64 : null,
+                    archivo_nombre: nombre, total_filas: datos.length, actualizado_en: ahora.toISOString()
+                });
+                const emitirSenal = () => window._sb.from('totem_examenes_signal')
+                    .upsert({ id: 1, version: ahora.toISOString() }, { onConflict: 'id' }).then(() => {}, () => {});
                 try {
-                    const { error } = await window._sb.from('totem_examenes').upsert({
-                        id: 1, data: datos, archivo_base64: base64, archivo_nombre: nombre,
-                        total_filas: datos.length, actualizado_en: ahora.toISOString()
-                    }, { onConflict: 'id' });
+                    let conArchivo = incluirArchivoInicial;
+                    let { error } = await window._sb.from('totem_examenes').upsert(fila(conArchivo), { onConflict: 'id' });
+                    // Si falló incluyendo el archivo (probable exceso de tamaño), reintentar solo con los datos.
+                    if (error && conArchivo) {
+                        conArchivo = false;
+                        const r2 = await window._sb.from('totem_examenes').upsert(fila(false), { onConflict: 'id' });
+                        error = r2.error;
+                    }
                     if (error) throw error;
-                    await window._sb.from('totem_examenes_signal').upsert(
-                        { id: 1, version: ahora.toISOString() }, { onConflict: 'id' }
-                    ).then(() => {}, () => {});
-                    logEvento('admin_examenes_sync', { filas: datos.length, archivo: nombre });
-                    setExamenesInfo({ status: 'sync', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
+                    await emitirSenal();
+                    logEvento('admin_examenes_sync', { filas: datos.length, archivo: nombre, sin_archivo: !conArchivo });
+                    setExamenesInfo({ status: conArchivo ? 'sync' : 'sync_sin_archivo', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
                 } catch(err) {
                     console.error('Error subiendo exámenes:', err);
                     setExamenesInfo({ status: 'error', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
@@ -1136,7 +1153,7 @@ if (window.supabase) {
                     const { data, error } = await window._sb
                         .from('totem_examenes').select('archivo_base64, archivo_nombre').eq('id', 1).maybeSingle();
                     if (error || !data || !data.archivo_base64) {
-                        alert('Aún no hay un archivo de exámenes almacenado. Sube uno primero.'); return;
+                        alert('No hay un Excel original descargable. Si el archivo que subiste era muy pesado, los exámenes igual se publicaron, pero no se guardó el archivo original para descargar.'); return;
                     }
                     const nombre = data.archivo_nombre || 'examenes.xlsx';
                     const blob = base64ToBlob(data.archivo_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -2884,6 +2901,11 @@ if (window.supabase) {
                                             {examenesInfo.status === 'sync' && (
                                                 <div className="mt-6 inline-flex items-center gap-2 text-base lg:text-lg font-bold text-green-600 dark:text-green-400">
                                                     <Icons.Check cls="w-5 h-5" /> Sincronizado · visible para todos los estudiantes
+                                                </div>
+                                            )}
+                                            {examenesInfo.status === 'sync_sin_archivo' && (
+                                                <div className="mt-6 inline-flex items-start gap-2 text-base lg:text-lg font-bold text-green-600 dark:text-green-400 max-w-2xl text-left">
+                                                    <Icons.Check cls="w-5 h-5 mt-1 shrink-0" /> <span>Sincronizado · visible para todos los estudiantes. <span className="font-medium text-slate-500 dark:text-slate-400">El archivo era muy pesado para guardar el original descargable, pero los exámenes se publicaron correctamente.</span></span>
                                                 </div>
                                             )}
                                             {examenesInfo.status === 'error' && (
