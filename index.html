@@ -299,9 +299,18 @@ if (window.supabase) {
             
             // UI y Correos
             const [isDarkMode, setIsDarkMode] = useState(false);
-            const [metrics, setMetrics] = useState({ clicks: 0, filters: 0, buttons: 0 });
+            // Las métricas viven en sessionStorage (mismo ciclo de vida que totem_sid):
+            // si la página se recarga, la sesión conserva su session_id y sus contadores,
+            // evitando que el upsert pise en Supabase lo ya acumulado con valores en cero.
+            const [metrics, setMetrics] = useState(() => {
+                try {
+                    const raw = sessionStorage.getItem('totem_metrics');
+                    if (raw) { const m = JSON.parse(raw); return { clicks: m.clicks || 0, filters: m.filters || 0, buttons: m.buttons || 0 }; }
+                } catch (e) {}
+                return { clicks: 0, filters: 0, buttons: 0 };
+            });
             const [sessionId] = useState(() => { try { let s = sessionStorage.getItem('totem_sid'); if (!s) { s = Date.now().toString(36) + Math.random().toString(36).slice(2, 8); sessionStorage.setItem('totem_sid', s); } return s; } catch(e) { return Date.now().toString(36); } });
-            const metricsRef = useRef({ clicks: 0, filters: 0, buttons: 0 });
+            const metricsRef = useRef(metrics);
             const metricsSyncTimer = useRef(null);
             const searchLogTimer = useRef(null);
             const [isConnecting, setIsConnecting] = useState(!!window._sb);
@@ -362,25 +371,48 @@ if (window.supabase) {
                 setItem: (key, value) => { try { localStorage.setItem(key, value); } catch(e) { console.warn("Storage bloqueado"); } }
             };
 
+            const syncMetricas = () => {
+                if (!window._sb) return;
+                const m = metricsRef.current;
+                window._sb.from('totem_metricas').upsert(
+                    { session_id: sessionId, clicks: m.clicks, filters: m.filters, buttons: m.buttons, updated_at: new Date().toISOString() },
+                    { onConflict: 'session_id' }
+                ).then(() => {}).catch(() => {});
+            };
+
             const scheduleMetricsSync = () => {
                 if (!window._sb) return;
                 clearTimeout(metricsSyncTimer.current);
-                metricsSyncTimer.current = setTimeout(() => {
-                    const m = metricsRef.current;
-                    window._sb.from('totem_metricas').upsert(
-                        { session_id: sessionId, clicks: m.clicks, filters: m.filters, buttons: m.buttons, updated_at: new Date().toISOString() },
-                        { onConflict: 'session_id' }
-                    ).then(() => {}).catch(() => {});
-                }, 8000);
+                metricsSyncTimer.current = setTimeout(syncMetricas, 8000);
+            };
+
+            // Envío inmediato al ocultar/cerrar la página: sin esto se pierden las
+            // interacciones de los últimos 8s (ventana del debounce). keepalive
+            // permite que el request sobreviva al cierre de la pestaña.
+            const flushMetricasAlSalir = () => {
+                clearTimeout(metricsSyncTimer.current);
+                const m = metricsRef.current;
+                if (!window._sbUrl || !window._sbKey || (m.clicks + m.filters + m.buttons) === 0) return;
+                try {
+                    fetch(window._sbUrl + '/rest/v1/totem_metricas?on_conflict=session_id', {
+                        method: 'POST',
+                        keepalive: true,
+                        headers: {
+                            'apikey': window._sbKey,
+                            'Authorization': 'Bearer ' + window._sbKey,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'resolution=merge-duplicates'
+                        },
+                        body: JSON.stringify({ session_id: sessionId, clicks: m.clicks, filters: m.filters, buttons: m.buttons, updated_at: new Date().toISOString() })
+                    });
+                } catch (e) {}
             };
 
             const trackAction = (type) => {
-                setMetrics(prev => {
-                    const next = { ...prev, [type]: prev[type] + 1 };
-                    safeStorage.setItem('totem_metrics', JSON.stringify(next));
-                    metricsRef.current = next;
-                    return next;
-                });
+                const next = { ...metricsRef.current, [type]: (metricsRef.current[type] || 0) + 1 };
+                metricsRef.current = next;
+                try { sessionStorage.setItem('totem_metrics', JSON.stringify(next)); } catch (e) {}
+                setMetrics(next);
                 scheduleMetricsSync();
             };
 
@@ -391,19 +423,44 @@ if (window.supabase) {
                 window._sb.from('totem_eventos').insert(payload).then(() => {}).catch(() => {});
             };
 
+            // Trae TODAS las filas paginando de a 1000: Supabase limita cada request a
+            // 1000 filas por defecto, así que un .limit(50000) igual devolvía solo 1000
+            // y el panel subcontaba silenciosamente al acumularse historia.
+            const fetchTablaCompleta = async (tabla, columnas, maxFilas) => {
+                const PAGINA = 1000;
+                const filas = [];
+                for (let desde = 0; desde < maxFilas; desde += PAGINA) {
+                    const { data, error } = await window._sb.from(tabla).select(columnas)
+                        .order('created_at', { ascending: false })
+                        .range(desde, desde + PAGINA - 1);
+                    if (error) throw error;
+                    if (!data || data.length === 0) break;
+                    filas.push(...data);
+                    if (data.length < PAGINA) break;
+                }
+                return filas;
+            };
+
+            // Clave de día en hora LOCAL del dispositivo. Antes se usaba el prefijo UTC
+            // del timestamp, lo que atribuía al día siguiente todo lo ocurrido después
+            // de las ~20:00-21:00 hora de Chile.
+            const claveDiaLocal = (iso) => {
+                const d = new Date(iso);
+                if (isNaN(d.getTime())) return '';
+                return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            };
+
             const cargarAnaliticas = async () => {
                 if (!window._sb) return;
                 try {
-                    const [mRes, eRes] = await Promise.all([
-                        window._sb.from('totem_metricas').select('clicks,filters,buttons,created_at').limit(20000),
-                        window._sb.from('totem_eventos').select('tipo,detalle,created_at').limit(50000)
+                    const [mRows, eRows] = await Promise.all([
+                        fetchTablaCompleta('totem_metricas', 'clicks,filters,buttons,created_at', 20000),
+                        fetchTablaCompleta('totem_eventos', 'tipo,detalle,created_at', 50000)
                     ]);
-                    const mRows = mRes.data || [];
-                    const eRows = eRes.data || [];
                     const dayMap = {};
                     let tC = 0, tF = 0, tB = 0, tS = 0;
                     mRows.forEach(r => {
-                        const k = (r.created_at || '').slice(0, 10);
+                        const k = r.created_at ? claveDiaLocal(r.created_at) : '';
                         if (!k) return;
                         const c = r.clicks || 0, f = r.filters || 0, b = r.buttons || 0;
                         if (!dayMap[k]) dayMap[k] = { interacciones: 0, clicks: 0, filtros: 0, botones: 0, sesiones: 0 };
@@ -582,26 +639,24 @@ if (window.supabase) {
 
             // Efectos Iniciales
             useEffect(() => {
-                const initMetrics = { clicks: 0, filters: 0, buttons: 0 };
-                setMetrics(initMetrics);
-                metricsRef.current = initMetrics;
-
-                const handleUserClick = () => {
-                    setMetrics(prev => {
-                        const next = { ...prev, clicks: prev.clicks + 1 };
-                        safeStorage.setItem('totem_metrics', JSON.stringify(next));
-                        metricsRef.current = next;
-                        return next;
-                    });
-                    scheduleMetricsSync();
+                // Un solo evento por toque: 'pointerdown' cubre mouse y pantalla táctil.
+                // Escuchar 'click' + 'touchstart' a la vez contaba cada toque dos veces
+                // en pantallas táctiles (touchstart + click sintetizado).
+                const handleUserTap = () => {
+                    trackAction('clicks');
                     setShowSuspension(false); // Despertar
                 };
-                window.addEventListener('click', handleUserClick);
-                window.addEventListener('touchstart', handleUserClick);
-                
+                const evento = window.PointerEvent ? 'pointerdown' : 'click';
+                window.addEventListener(evento, handleUserTap);
+
+                const onHide = () => { if (document.visibilityState === 'hidden') flushMetricasAlSalir(); };
+                window.addEventListener('pagehide', flushMetricasAlSalir);
+                document.addEventListener('visibilitychange', onHide);
+
                 return () => {
-                    window.removeEventListener('click', handleUserClick);
-                    window.removeEventListener('touchstart', handleUserClick);
+                    window.removeEventListener(evento, handleUserTap);
+                    window.removeEventListener('pagehide', flushMetricasAlSalir);
+                    document.removeEventListener('visibilitychange', onHide);
                 };
             }, []);
 
