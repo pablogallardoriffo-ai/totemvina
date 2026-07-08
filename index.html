@@ -2454,6 +2454,10 @@ if (window.supabase) {
                                             </div>
                                         ) : (() => {
                                             const term = examenSearch.toLowerCase();
+                                            // Vista por defecto (sin ningún filtro aplicado): se descartan los exámenes que ya se
+                                            // dieron (días pasados y los de hoy ya finalizados) para mostrar solo los de HOY en
+                                            // adelante. Si el usuario aplica cualquier filtro, se respeta y se muestran todos.
+                                            const sinFiltros = !term && !examenFechaFilter && !examenCarreraFilter && !examenNivelFilter && !examenJornadaFilter && examenFilter === 'ALL';
                                             const filtered = examenes.filter(ex => {
                                                 const vals = Object.entries(ex).filter(([k]) => !k.startsWith('_label_')).map(([,v]) => v.toLowerCase()).join(' ');
                                                 const passSearch = !term || vals.includes(term);
@@ -2468,7 +2472,9 @@ if (window.supabase) {
                                                     examenFilter === 'EN_CURSO' ? txtEstado === 'EN CURSO' :
                                                     examenFilter === 'POR_EMPEZAR' ? (txtEstado === '¡POR COMENZAR!' || txtEstado === 'HOY · POR COMENZAR' || txtEstado === 'HOY') :
                                                     examenFilter === 'POR_FINALIZAR' ? txtEstado === '¡POR FINALIZAR!' : true;
-                                                return passSearch && passDate && passCarrera && passNivel && passJornada && passEstado;
+                                                // Solo en la vista por defecto: ocultar los ya realizados (mantiene los sin fecha válida).
+                                                const passNoPasados = !sinFiltros || txtEstado !== 'REALIZADO';
+                                                return passSearch && passDate && passCarrera && passNivel && passJornada && passEstado && passNoPasados;
                                             }).sort((a, b) => {
                                                 const fa = parseExamenFecha(a.fecha || a.fecha_examen || a.fecha_de_examen || a.date || '');
                                                 const fb = parseExamenFecha(b.fecha || b.fecha_examen || b.fecha_de_examen || b.date || '');
@@ -2483,8 +2489,9 @@ if (window.supabase) {
                                             const getF = (ex, ...keys) => { for (const k of keys) if (ex[k]) return ex[k]; return ''; };
                                             return filtered.length === 0 ? (
                                                 <div className="flex-1 flex flex-col items-center justify-center text-center p-8 gap-3">
-                                                    <Icons.Search cls="w-14 h-14 text-slate-200 dark:text-slate-700" />
-                                                    <p className="text-lg font-bold text-slate-400 dark:text-slate-500">Sin exámenes para los filtros aplicados</p>
+                                                    {sinFiltros ? <Icons.GraduationCap cls="w-16 h-16 text-slate-200 dark:text-slate-700" /> : <Icons.Search cls="w-14 h-14 text-slate-200 dark:text-slate-700" />}
+                                                    <p className="text-lg font-bold text-slate-400 dark:text-slate-500">{sinFiltros ? 'No hay exámenes pendientes por hoy' : 'Sin exámenes para los filtros aplicados'}</p>
+                                                    {sinFiltros && <p className="text-sm font-semibold text-slate-400 dark:text-slate-500 max-w-md">Los exámenes ya realizados se ocultan automáticamente. Usa el filtro de fecha para ver todos.</p>}
                                                 </div>
                                             ) : (
                                                 <div className="flex-1 flex flex-col bg-white dark:bg-duoc-card lg:rounded-[1.5rem] rounded-xl shadow-md border border-slate-200 dark:border-slate-700 overflow-hidden">
