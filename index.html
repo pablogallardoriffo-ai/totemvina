@@ -1890,14 +1890,148 @@ if (window.supabase) {
             }
 
             if (showSuspension) {
+                const hh = filterTime.getHours().toString().padStart(2, '0');
+                const mm = filterTime.getMinutes().toString().padStart(2, '0');
+                const ss = filterTime.getSeconds().toString().padStart(2, '0');
+
+                // ¿La pestaña marcada es Exámenes? → el salvapantallas muestra los exámenes de HOY.
+                const screensaverExamMode = vistaPublica === 'EXAMENES' || (vistaPublica === 'AMBAS' && carteleraTab === 'EXAMENES');
+
+                if (screensaverExamMode) {
+                    const hoy0 = new Date(filterTime.getFullYear(), filterTime.getMonth(), filterTime.getDate());
+                    const getExF = (ex, ...keys) => { for (const k of keys) if (ex[k]) return ex[k]; return ''; };
+                    // Prioridad: en curso (incl. por finalizar) primero, luego por comenzar/hoy, realizados al final.
+                    const examPriority = (st) => {
+                        if (!st) return 3;
+                        if (st.texto === 'EN CURSO' || st.texto === '¡POR FINALIZAR!') return 1;
+                        if (st.texto === '¡POR COMENZAR!' || st.texto === 'HOY · POR COMENZAR' || st.texto === 'HOY') return 2;
+                        if (st.texto === 'REALIZADO') return 4;
+                        return 3;
+                    };
+                    // Solo exámenes cuya fecha es HOY, ordenados dinámicamente por estado (en curso primero) y hora.
+                    const examHoy = examenes.filter(ex => {
+                        const f = parseExamenFecha(getExF(ex, 'fecha', 'fecha_examen', 'fecha_de_examen', 'date'));
+                        return f && f.getTime() === hoy0.getTime();
+                    }).sort((a, b) => {
+                        const pa = examPriority(getExamenStatus(a));
+                        const pb = examPriority(getExamenStatus(b));
+                        if (pa !== pb) return pa - pb;
+                        const ha = formatExcelTime(getExF(a, 'hora_inicio', 'horainicio', 'hora_inicio_examen', 'hora'));
+                        const hb = formatExcelTime(getExF(b, 'hora_inicio', 'horainicio', 'hora_inicio_examen', 'hora'));
+                        return ha.localeCompare(hb);
+                    });
+                    const enCursoCount = examHoy.filter(ex => { const s = getExamenStatus(ex); return s && (s.texto === 'EN CURSO' || s.texto === '¡POR FINALIZAR!'); }).length;
+                    const fechaHoyTxt = (() => { const t = hoy0.toLocaleDateString('es-CL', { weekday: 'long', day: '2-digit', month: 'long' }); return t.charAt(0).toUpperCase() + t.slice(1); })();
+
+                    return (
+                        <div className="app-shell w-screen bg-duoc-blue dark:bg-duoc-darker text-white flex flex-col cursor-pointer overflow-hidden animate-fade-in" onClick={() => setShowSuspension(false)}>
+                            <header className="px-6 py-6 lg:px-12 lg:py-8 flex justify-between items-center border-b-[2px] border-white/10 bg-black/20 shrink-0">
+                                <div className="flex items-center gap-4 lg:gap-6">
+                                    <div className="hidden lg:flex w-20 h-20 bg-white/10 rounded-2xl items-center justify-center">
+                                        <Icons.GraduationCap cls="w-10 h-10 text-duoc-yellow" />
+                                    </div>
+                                    <div className="flex flex-col">
+                                        <h1 className="text-2xl lg:text-4xl font-black tracking-wide text-white uppercase">Exámenes de Hoy</h1>
+                                        <p className="text-sm lg:text-xl text-blue-200 dark:text-slate-400 mt-1 font-medium tracking-wide capitalize">{fechaHoyTxt} · Toque para salir.</p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    {enCursoCount > 0 && (
+                                        <div className="hidden lg:inline-flex items-center gap-2 mb-2 px-4 py-1.5 rounded-full bg-green-500/20 border border-green-400/40 text-green-300 text-lg font-black uppercase tracking-wide">
+                                            <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse"></span>
+                                            {enCursoCount} en curso
+                                        </div>
+                                    )}
+                                    <div className="text-4xl lg:text-[5.5rem] font-black tabular-nums text-duoc-yellow leading-none tracking-tighter flex items-baseline justify-end drop-shadow-sm">
+                                        {hh}:{mm}:{ss}
+                                    </div>
+                                </div>
+                            </header>
+
+                            <InfoBar barra={barraInfo} isDarkMode={isDarkMode} transparent />
+
+                            <div className="hidden lg:flex text-blue-200 dark:text-slate-400 bg-black/30 px-12 py-4 shrink-0 text-lg font-black uppercase tracking-widest border-b border-white/5 shadow-md z-10">
+                                <div className="w-44 shrink-0">Horario</div>
+                                <div className="w-48 shrink-0">Sigla</div>
+                                <div className="flex-[1.5] min-w-0 pr-6">Asignatura</div>
+                                <div className="flex-[1.2] min-w-0 pr-6">Docente</div>
+                                <div className="w-36 shrink-0 text-center">Sala</div>
+                                <div className="w-48 shrink-0 text-center pl-6">Estado</div>
+                            </div>
+
+                            <div ref={suspensionScrollRef} className="flex-1 overflow-y-auto custom-scrollbar lg:pb-32 pb-10">
+                                {examHoy.length === 0 ? (
+                                    <div className="h-full flex flex-col items-center justify-center gap-4 text-blue-200/50 font-bold p-8 text-center">
+                                        <Icons.GraduationCap cls="w-20 h-20 lg:w-28 lg:h-28 text-white/10" />
+                                        <span className="text-xl lg:text-3xl">No hay exámenes programados para hoy.</span>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y divide-white/5">
+                                        {examHoy.map((ex, idx) => {
+                                            const asig = getExF(ex, 'asignatura', 'ramo', 'nombre', 'nombre_asignatura');
+                                            const sec = getExF(ex, 'seccion', 'sigla', 'codigo', 'seccion_id');
+                                            const doc = getExF(ex, 'docente', 'profesor');
+                                            const sala = getExF(ex, 'sala', 'recinto', 'sala_examen');
+                                            const horaI = fmtHoraExamen(getExF(ex, 'hora_inicio', 'horaInicio', 'hora_inicio_examen', 'hora'));
+                                            const horaF = fmtHoraExamen(getExF(ex, 'hora_fin', 'horaFin', 'hora_fin_examen'));
+                                            const horaTxt = horaI && horaF ? `${horaI} - ${horaF}` : (horaI || 'Todo el día');
+                                            const status = getExamenStatus(ex);
+                                            return (
+                                                <div key={idx} className="flex flex-col lg:flex-row px-6 py-4 lg:px-12 lg:py-6 items-start lg:items-center hover:bg-white/5 transition-colors gap-2 lg:gap-0">
+                                                    <div className="w-full flex justify-between lg:hidden mb-2 items-center">
+                                                        <span className="text-lg font-black text-white tabular-nums"><Icons.Clock cls="w-4 h-4 inline mr-1 text-duoc-yellow" />{horaTxt}</span>
+                                                        {status && (
+                                                            <span className={`px-3 py-1 rounded-lg text-xs font-black border flex items-center gap-1 ${status.bg} ${status.text} ${status.border}`}>
+                                                                {status.isImportant && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>}
+                                                                {status.texto}
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="hidden lg:block w-44 shrink-0 text-xl font-black text-white tabular-nums">{horaTxt}</div>
+
+                                                    <div className="hidden lg:block w-48 shrink-0 pr-4">
+                                                        {sec && <span className="inline-block text-lg font-bold text-blue-100 dark:text-slate-300 bg-black/40 px-3 py-1.5 rounded-lg border border-white/10 truncate max-w-full" title={sec}>{sec}</span>}
+                                                    </div>
+
+                                                    <div className="w-full lg:flex-[1.5] min-w-0 lg:pr-6 text-xl lg:text-2xl font-black text-white truncate lg:whitespace-normal break-words">{asig || '(Sin asignatura)'}</div>
+
+                                                    <div className="w-full lg:flex-[1.2] min-w-0 lg:pr-6 text-sm lg:text-xl font-medium text-blue-200 dark:text-slate-400 break-words">{doc}</div>
+
+                                                    <div className="w-full flex lg:hidden items-center justify-end mt-2 pt-2 border-t border-white/10">
+                                                        {sala && <div className="px-3 py-1.5 rounded-lg text-base font-black bg-black/50 text-duoc-yellow border border-duoc-yellow/30">{sala}</div>}
+                                                    </div>
+
+                                                    <div className="hidden lg:block w-36 shrink-0 text-center">
+                                                        {sala
+                                                            ? <div className="inline-block w-full px-3 py-2 rounded-xl text-xl font-black bg-black/50 text-duoc-yellow border border-duoc-yellow/30 truncate">{sala}</div>
+                                                            : <span className="text-white/20">—</span>}
+                                                    </div>
+                                                    <div className="hidden lg:block w-48 shrink-0 text-center pl-6">
+                                                        {status && (
+                                                            <span className={`w-full text-sm font-black px-3 py-2.5 rounded-xl text-center border shadow-sm flex flex-col justify-center items-center ${status.bg} ${status.text} ${status.border}`}>
+                                                                <span className="flex items-center gap-2">
+                                                                    {status.isImportant && <span className="w-2 h-2 rounded-full bg-current animate-pulse"></span>}
+                                                                    {status.texto}
+                                                                </span>
+                                                                {status.desc && <span className="text-xs mt-0.5 animate-pulse-fast">{status.desc}</span>}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                }
+
                 const airportData = data.filter(item => {
                     const st = getClaseStatus(item);
                     return st.isImportant;
                 }).sort((a, b) => a.horaInicio.localeCompare(b.horaInicio));
-
-                const hh = filterTime.getHours().toString().padStart(2, '0');
-                const mm = filterTime.getMinutes().toString().padStart(2, '0');
-                const ss = filterTime.getSeconds().toString().padStart(2, '0');
 
                 return (
                     <div className="app-shell w-screen bg-duoc-blue dark:bg-duoc-darker text-white flex flex-col cursor-pointer overflow-hidden animate-fade-in" onClick={() => setShowSuspension(false)}>
