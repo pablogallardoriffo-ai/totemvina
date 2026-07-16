@@ -55,6 +55,11 @@ body { font-family: "Montserrat", system-ui, sans-serif; overflow: hidden; }
 .animate-slide-up { animation: slideUp 0.4s ease-out forwards; }
 @keyframes pulse-fast { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 .animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+/* Virtualización por CSS: el navegador se salta el layout/paint de las filas
+   fuera de pantalla. Clave para que el scroll y la búsqueda no se sientan
+   "pegados" cuando la cartelera tiene muchas clases/exámenes. El tamaño es
+   solo una estimación inicial; con "auto" el navegador recuerda el real. */
+.cv-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }
 </style>
 </head>
 <body class="bg-slate-100 dark:bg-duoc-dark text-slate-800 dark:text-slate-200 transition-colors duration-300">
@@ -1680,6 +1685,7 @@ if (window.supabase) {
                     '.animate-slide-up { animation: slideUp 0.4s ease-out forwards; }',
                     '@keyframes pulse-fast { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }',
                     '.animate-pulse-fast { animation: pulse-fast 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }',
+                    '.cv-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }',
                     '</style>\n</head>',
                     '<body class="bg-slate-100 dark:bg-duoc-dark text-slate-800 dark:text-slate-200 transition-colors duration-300">',
                     '<div id="root"></div>',
@@ -2312,7 +2318,7 @@ if (window.supabase) {
                                                     const sinRecinto = clase.sala === 'Sin recinto';
 
                                                     return (
-                                                        <div key={idx} className={`flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none ${highlight ? 'bg-white lg:bg-slate-50/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-slate-800'}`}>
+                                                        <div key={idx} className={`cv-row flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none ${highlight ? 'bg-white lg:bg-slate-50/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-slate-800'}`}>
                                                             
                                                             {/* MOBILE: Top Row (Hora + Estado) */}
                                                             <div className="w-full flex lg:hidden justify-between items-center mb-2">
@@ -2550,7 +2556,7 @@ if (window.supabase) {
                                                                 const alumnos = getF(ex, 'alumnos', 'inscritos', 'matriculados');
                                                                 const estado = getExamenStatus(ex);
                                                                 return (
-                                                                    <div key={idx} className="flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none border-slate-200 dark:border-slate-800">
+                                                                    <div key={idx} className="cv-row flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none border-slate-200 dark:border-slate-800">
 
                                                                         {/* MOBILE: Fecha/Hora + Estado */}
                                                                         <div className="w-full flex lg:hidden justify-between items-center mb-2">
