@@ -266,6 +266,10 @@ if (window.supabase) {
 
         const App = () => {
             const [filterTime, setFilterTime] = useState(new Date());
+            // Reloj con segundos usado SOLO por el salvapantallas. Tictaquea cada segundo
+            // únicamente mientras el tótem está suspendido; así el reloj sigue vivo sin
+            // obligar a re-renderizar toda la cartelera cada segundo (ver filterTime).
+            const [suspClock, setSuspClock] = useState(() => new Date());
             const [data, setData] = useState([]);
             const [isLoaded, setIsLoaded] = useState(false);
             const [error, setError] = useState('');
@@ -713,6 +717,15 @@ if (window.supabase) {
                 };
             }, [activeTab, showPasswordModal, showSurveyModal, showQrModal, emailModal.show, kioskLocked, suspensionSeg]);
 
+            // Mientras el tótem está suspendido, el salvapantallas muestra un reloj con
+            // segundos: lo alimentamos con su propio intervalo para no tocar filterTime.
+            useEffect(() => {
+                if (!showSuspension) return;
+                setSuspClock(new Date());
+                const t = setInterval(() => setSuspClock(new Date()), 1000);
+                return () => clearInterval(t);
+            }, [showSuspension]);
+
             useEffect(() => {
                 let scrollInterval;
                 if (showSuspension && suspensionScrollRef.current && window.innerWidth >= 1024) {
@@ -749,7 +762,20 @@ if (window.supabase) {
                 const savedTheme = safeStorage.getItem('totem_theme');
                 if (savedTheme === 'dark') setIsDarkMode(true);
                 
-                const filterTimer = setInterval(() => setFilterTime(new Date()), 1000); 
+                // El estado de clases/exámenes tiene resolución de MINUTO: solo actualizamos
+                // filterTime cuando cambia el minuto (o el día). Antes se actualizaba cada
+                // segundo, lo que recalculaba el filtrado/orden y re-renderizaba TODA la
+                // cartelera cada segundo — con muchos datos eso volvía lento y "pegado" el
+                // buscador. Ahora la cartelera solo se recalcula al cambiar de minuto o filtro.
+                const filterTimer = setInterval(() => {
+                    setFilterTime(prev => {
+                        const now = new Date();
+                        return (now.getMinutes() === prev.getMinutes()
+                            && now.getHours() === prev.getHours()
+                            && now.getDate() === prev.getDate()
+                            && now.getMonth() === prev.getMonth()) ? prev : now;
+                    });
+                }, 1000);
                 return () => clearInterval(filterTimer);
             }, []);
 
@@ -1456,46 +1482,48 @@ if (window.supabase) {
                 }
             };
 
+            // Dedup una sola vez por dataset (no en cada tecleo del buscador ni cada minuto).
+            const dedupedData = useMemo(() => dedupClases(data), [data]);
+
             const sortedFilteredData = useMemo(() => {
-                const filtered = dedupClases(data).filter(item => {
-                    const statusInfo = getClaseStatus(item);
+                const searchLower = searchTerm.toLowerCase();
+                const getPriority = (status) => {
+                    if (status.texto === 'EN CURSO' || status.texto === '¡POR COMENZAR!' || status.texto === '¡POR FINALIZAR!') return 1;
+                    if (status.texto === 'REALIZADA') return 3;
+                    return 2;
+                };
+                // Calculamos el estado UNA vez por ítem (antes se recalculaba en cada
+                // comparación del sort: O(n·log n) llamadas) y ordenamos sobre eso.
+                const filtered = [];
+                for (const item of dedupedData) {
                     const matchDia = activeDia === 'Todos' || item.dia === activeDia;
                     const matchJornada = selectedJornada === '' || item.jornada === selectedJornada;
                     const matchEscuela = selectedEscuela === '' || item.escuela === selectedEscuela;
                     const matchSigla = selectedSigla === '' || item.seccion === selectedSigla;
-                    const searchLower = searchTerm.toLowerCase();
-                    const matchSearch = searchTerm === '' || 
+                    if (!(matchDia && matchJornada && matchEscuela && matchSigla)) continue;
+                    const matchSearch = searchTerm === '' ||
                         item.asignatura.toLowerCase().includes(searchLower) ||
                         item.docente.toLowerCase().includes(searchLower) ||
                         item.seccion.toLowerCase().includes(searchLower) ||
                         item.sala.toLowerCase().includes(searchLower);
-                    
-                    const matchActive = 
+                    if (!matchSearch) continue;
+
+                    const statusInfo = getClaseStatus(item);
+                    const matchActive =
                         activeFilter === 'ALL' ? true :
                         activeFilter === 'EN_CURSO' ? (statusInfo.texto === 'EN CURSO' || statusInfo.texto === '¡POR FINALIZAR!') :
                         activeFilter === 'POR_EMPEZAR' ? statusInfo.texto === '¡POR COMENZAR!' :
                         activeFilter === 'POR_FINALIZAR' ? statusInfo.texto === '¡POR FINALIZAR!' : true;
+                    if (!matchActive) continue;
 
-                    return matchDia && matchJornada && matchEscuela && matchSigla && matchSearch && matchActive;
+                    filtered.push({ item, prio: getPriority(statusInfo) });
+                }
+                filtered.sort((a, b) => {
+                    if (a.prio !== b.prio) return a.prio - b.prio;
+                    return a.item.horaInicio.localeCompare(b.item.horaInicio);
                 });
-                return [...filtered].sort((a, b) => {
-                    const statusA = getClaseStatus(a);
-                    const statusB = getClaseStatus(b);
-                    
-                    const getPriority = (status) => {
-                        if (status.texto === 'EN CURSO' || status.texto === '¡POR COMENZAR!' || status.texto === '¡POR FINALIZAR!') return 1;
-                        if (status.texto === 'REALIZADA') return 3;
-                        return 2; 
-                    };
-
-                    const prioA = getPriority(statusA);
-                    const prioB = getPriority(statusB);
-
-                    if (prioA !== prioB) return prioA - prioB;
-
-                    return a.horaInicio.localeCompare(b.horaInicio);
-                });
-            }, [data, activeDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, todayName, filterTime]);
+                return filtered.map(f => f.item);
+            }, [dedupedData, activeDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, todayName, filterTime]);
 
             // Opciones disponibles para los filtros de la vista de exámenes (carrera/nivel/jornada).
             const examenOpciones = useMemo(() => {
@@ -1890,9 +1918,9 @@ if (window.supabase) {
             }
 
             if (showSuspension) {
-                const hh = filterTime.getHours().toString().padStart(2, '0');
-                const mm = filterTime.getMinutes().toString().padStart(2, '0');
-                const ss = filterTime.getSeconds().toString().padStart(2, '0');
+                const hh = suspClock.getHours().toString().padStart(2, '0');
+                const mm = suspClock.getMinutes().toString().padStart(2, '0');
+                const ss = suspClock.getSeconds().toString().padStart(2, '0');
 
                 // ¿La pestaña marcada es Exámenes? → el salvapantallas muestra los exámenes de HOY.
                 const screensaverExamMode = vistaPublica === 'EXAMENES' || (vistaPublica === 'AMBAS' && carteleraTab === 'EXAMENES');
