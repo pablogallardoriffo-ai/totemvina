@@ -349,9 +349,22 @@ function resolverColumnas(headers, muestra) {
         }
         if (ok > mejor) { mejor = ok; evId = i; }
     }
+    // Columna R: marca el tipo de recurso de la fila con una sola letra, G = sala,
+    // P = profesor. Es el dato fiable para separarlos; el texto de "Tipo de recurso"
+    // no lo es, porque hay muchas denominaciones de sala y de docente.
+    var pg = -1, mejorPg = 0;
+    for (var i2 = 0; i2 < headers.length; i2++) {
+        if (h[i2] !== 'recursos' || i2 === cols.recurso) continue;
+        var ok2 = 0;
+        for (var j2 = 0; j2 < muestra.length; j2++) {
+            if (/^[PG]$/i.test(String(muestra[j2][i2] == null ? '' : muestra[j2][i2]).trim())) ok2++;
+        }
+        if (ok2 > mejorPg) { mejorPg = ok2; pg = i2; }
+    }
     var def = { seccion: 0, tipo: 1, recurso: 3, recursoNom: 4, fecha: 5, hi: 7, hf: 8, denom: 10 };
     for (var k in def) if (cols[k] === -1) cols[k] = def[k];
     cols.evId = evId !== -1 ? evId : 13;
+    cols.pg = pg !== -1 ? pg : 17;
     return cols;
 }
 
@@ -394,13 +407,22 @@ self.onmessage = function (e) {
             var rec = String(f[cols.recurso] == null ? '' : f[cols.recurso]).trim();
             var recNom = String(f[cols.recursoNom] == null ? '' : f[cols.recursoNom]).trim();
             // El reporte trae el docente y la sala en filas separadas del mismo evento:
-            // aquí se pivotean a un solo bloque.
-            if (ES_DOCENTE.test(norm(tipo))) {
+            // aquí se pivotean a un solo bloque. Quién es quién lo decide la marca de
+            // la columna R (G = sala, P = profesor); el nombre del tipo de recurso solo
+            // se usa si esa marca viniera vacía. Cada fila va a un lado o al otro,
+            // nunca a los dos, para que un docente no termine apareciendo como sala.
+            var marca = String(f[cols.pg] == null ? '' : f[cols.pg]).trim().toUpperCase();
+            var esSala = marca === 'G' ? true
+                       : marca === 'P' ? false
+                       : !ES_DOCENTE.test(norm(tipo));
+            if (esSala) {
+                if (rec) {
+                    g.salas.add(rec);
+                    if (recNom) g.salasNom.add(recNom);
+                    if (tipo) g.tipos.add(tipo);
+                }
+            } else {
                 if (recNom) g.docentes.add(recNom); else if (rec) g.docentes.add(rec);
-            } else if (rec) {
-                g.salas.add(rec);
-                if (recNom) g.salasNom.add(recNom);
-                if (tipo) g.tipos.add(tipo);
             }
 
             if ((i & 8191) === 0) self.postMessage({ tipo: 'progreso', fase: 'parseo', hechas: i, total: total });
@@ -500,6 +522,12 @@ self.onmessage = function (e) {
             const [loteActivo, setLoteActivo] = useState('');
             // Próxima fecha con clases, cuando el día en pantalla no tiene ninguna.
             const [proximaFecha, setProximaFecha] = useState('');
+            // Fecha que quedó sin clases y obligó a avanzar solo (alimenta el aviso).
+            const [saltoAuto, setSaltoAuto] = useState('');
+            // El avance automático es la conducta por defecto del kiosco. En cuanto
+            // alguien toca el navegador de fechas se respeta su elección y deja de
+            // moverse solo, hasta que la inactividad devuelve el tótem a su estado base.
+            const navegacionManual = useRef(false);
             // Mapa ID de evento -> { escuela, jornada, asignatura, alumnos }, aportado por la sábana.
             const [metaEventos, setMetaEventos] = useState({});
             const [recursosInfo, setRecursosInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, bloques: 0, progreso: 0, mensaje: '' });
@@ -534,6 +562,12 @@ self.onmessage = function (e) {
             // Las reservas son por fecha concreta, así que el tótem se posiciona en un
             // día real (YYYY-MM-DD) en vez de un día de la semana genérico.
             const isoDeFecha = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            const siguienteDiaISO = (iso) => {
+                const [a, m, d] = iso.split('-').map(Number);
+                const f = new Date(a, m - 1, d);
+                f.setDate(f.getDate() + 1);
+                return isoDeFecha(f);
+            };
             const hoyISO = isoDeFecha(filterTime);
             const [fechaSel, setFechaSel] = useState(hoyISO);
             const [selectedJornada, setSelectedJornada] = useState('');
@@ -846,7 +880,10 @@ self.onmessage = function (e) {
                             setShowSuspension(true);
                         }
 
-                        // Limpiar Filtros: al quedar inactivo el tótem vuelve al día de hoy.
+                        // Limpiar Filtros: al quedar inactivo el tótem vuelve al día de hoy
+                        // y recupera el avance automático a días futuros.
+                        navegacionManual.current = false;
+                        setSaltoAuto('');
                         setFechaSel(isoDeFecha(new Date()));
                         setSelectedJornada('');
                         setSelectedEscuela('');
@@ -1085,10 +1122,16 @@ self.onmessage = function (e) {
                     try {
                         const filas = await traerBloques(fechaSel, loteActivo);
                         if (!vigente) return;
+                        // Si hoy no hay nada que mostrar, el tótem avanza solo al próximo
+                        // día con clases en vez de quedarse con la pantalla vacía.
+                        if (!filas.length && fechaSel === hoyISO && !navegacionManual.current) {
+                            const prox = await proximaFechaConClases(siguienteDiaISO(fechaSel), loteActivo);
+                            if (vigente && prox) { setSaltoAuto(fechaSel); setFechaSel(prox); return; }
+                        }
                         setBloques(filas);
                         if (!filas.length) {
-                            const prox = await proximaFechaConClases(fechaSel, loteActivo);
-                            if (vigente && prox && prox !== fechaSel) setProximaFecha(prox);
+                            const prox = await proximaFechaConClases(siguienteDiaISO(fechaSel), loteActivo);
+                            if (vigente && prox) setProximaFecha(prox);
                         }
                     } catch (e) {
                         if (vigente) setBloques([]);
@@ -1097,7 +1140,23 @@ self.onmessage = function (e) {
                     }
                 })();
                 return () => { vigente = false; };
-            }, [fechaSel, loteActivo]);
+            }, [fechaSel, loteActivo, hoyISO]);
+
+            // Cuando la última clase del día ya terminó, la cartelera queda entera en
+            // "REALIZADA" y deja de ser útil: el tótem pasa solo al próximo día con
+            // actividad. Se reevalúa con el reloj, así el cambio ocurre al vuelo.
+            useEffect(() => {
+                if (!loteActivo || navegacionManual.current) return;
+                if (fechaSel !== hoyISO || !bloques.length) return;
+                const ahora = String(filterTime.getHours()).padStart(2, '0') + ':' + String(filterTime.getMinutes()).padStart(2, '0');
+                if (!bloques.every(b => b.hora_fin <= ahora)) return;
+                let vigente = true;
+                (async () => {
+                    const prox = await proximaFechaConClases(siguienteDiaISO(hoyISO), loteActivo);
+                    if (vigente && prox) { setSaltoAuto(hoyISO); setFechaSel(prox); }
+                })();
+                return () => { vigente = false; };
+            }, [filterTime, bloques, fechaSel, loteActivo, hoyISO]);
 
             // ─── Realtime: encuestas en vivo ────────────────────
             useEffect(() => {
@@ -1852,12 +1911,18 @@ self.onmessage = function (e) {
                 const d = fechaDesdeISO(fechaSel);
                 d.setDate(d.getDate() + dias);
                 const iso = isoDeFecha(d);
+                navegacionManual.current = true;
+                setSaltoAuto('');
                 setFechaSel(iso);
                 trackAction('filters');
                 logEvento('filtro_fecha', { fecha: iso });
             };
             const etiquetaFecha = useMemo(() => {
                 const txt = fechaDesdeISO(fechaSel).toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' });
+                return txt.charAt(0).toUpperCase() + txt.slice(1);
+            }, [fechaSel]);
+            const etiquetaFechaLarga = useMemo(() => {
+                const txt = fechaDesdeISO(fechaSel).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
                 return txt.charAt(0).toUpperCase() + txt.slice(1);
             }, [fechaSel]);
             const etiquetaProxima = useMemo(() => {
@@ -2663,7 +2728,7 @@ self.onmessage = function (e) {
                                     </div>
 
                                     {fechaSel !== hoyISO && (
-                                        <button onClick={() => { setFechaSel(hoyISO); trackAction('filters'); }}
+                                        <button onClick={() => { navegacionManual.current = true; setSaltoAuto(''); setFechaSel(hoyISO); trackAction('filters'); }}
                                             className="shrink-0 px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue text-sm lg:text-lg font-black hover:opacity-90 transition-opacity">
                                             Hoy
                                         </button>
@@ -2683,6 +2748,16 @@ self.onmessage = function (e) {
 
                             {/* TABLA PRINCIPAL DE CLASES */}
                             <main className="flex-1 flex flex-col p-3 lg:p-6 overflow-hidden">
+                                {/* El tótem avanzó solo porque hoy ya no queda nada por mostrar.
+                                    Se avisa para que nadie crea que está viendo el día de hoy. */}
+                                {saltoAuto && fechaSel !== hoyISO && (
+                                    <div className="mb-3 flex items-center gap-3 rounded-xl lg:rounded-2xl border-2 border-duoc-yellow bg-duoc-yellow/15 dark:bg-duoc-yellow/10 px-4 py-3 shrink-0">
+                                        <Icons.Calendar cls="w-5 h-5 lg:w-6 lg:h-6 text-duoc-blue dark:text-duoc-yellow shrink-0" />
+                                        <p className="text-sm lg:text-lg font-bold text-duoc-blue dark:text-duoc-yellow">
+                                            Hoy ya no quedan clases. Mostrando el {etiquetaFechaLarga}.
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="flex-1 flex flex-col bg-white dark:bg-duoc-card lg:rounded-[1.5rem] rounded-xl shadow-md border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors duration-300">
                                     
                                     <div className="hidden lg:flex text-duoc-blue dark:text-slate-300 bg-slate-100/80 dark:bg-slate-800/80 px-8 py-4 shrink-0 text-sm font-black uppercase tracking-widest border-b-[3px] border-slate-200 dark:border-slate-700 transition-colors duration-300">
@@ -2712,7 +2787,7 @@ self.onmessage = function (e) {
                                                     No hay clases registradas para el {etiquetaFecha.toLowerCase()}.
                                                 </p>
                                                 {proximaFecha && (
-                                                    <button onClick={() => { setFechaSel(proximaFecha); trackAction('buttons'); logEvento('salto_proxima_fecha', { fecha: proximaFecha }); }}
+                                                    <button onClick={() => { navegacionManual.current = true; setSaltoAuto(''); setFechaSel(proximaFecha); trackAction('buttons'); logEvento('salto_proxima_fecha', { fecha: proximaFecha }); }}
                                                         className="px-6 py-3 rounded-xl bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue font-black text-base lg:text-lg hover:opacity-90 transition-opacity shadow-md">
                                                         Ver el {etiquetaProxima}
                                                     </button>
