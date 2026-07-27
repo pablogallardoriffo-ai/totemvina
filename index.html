@@ -562,18 +562,29 @@ self.onmessage = function (e) {
             // Las reservas son por fecha concreta, así que el tótem se posiciona en un
             // día real (YYYY-MM-DD) en vez de un día de la semana genérico.
             const isoDeFecha = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-            const siguienteDiaISO = (iso) => {
+            const sumarDiasISO = (iso, n) => {
                 const [a, m, d] = iso.split('-').map(Number);
                 const f = new Date(a, m - 1, d);
-                f.setDate(f.getDate() + 1);
+                f.setDate(f.getDate() + n);
                 return isoDeFecha(f);
             };
+            const siguienteDiaISO = (iso) => sumarDiasISO(iso, 1);
+            // Valor especial de fechaSel: en vez de un día concreto, la cartelera
+            // muestra todo lo que viene desde hoy.
+            const TODOS_LOS_DIAS = 'TODOS';
+            // Sin búsqueda, "todos los días" se acota a esta ventana: traer el semestre
+            // entero serían decenas de miles de bloques. Al buscar, el filtro se hace en
+            // el servidor y sí abarca todas las fechas.
+            const DIAS_VENTANA_TODOS = 7;
             const hoyISO = isoDeFecha(filterTime);
             const [fechaSel, setFechaSel] = useState(hoyISO);
             const [selectedJornada, setSelectedJornada] = useState('');
             const [selectedEscuela, setSelectedEscuela] = useState('');
             const [selectedSigla, setSelectedSigla] = useState(''); 
             const [searchTerm, setSearchTerm] = useState('');
+            // Versión retrasada del buscador: en modo "todos los días" la búsqueda se
+            // resuelve en el servidor, y no conviene lanzar una consulta por tecla.
+            const [busquedaDif, setBusquedaDif] = useState('');
             const [activeFilter, setActiveFilter] = useState('ALL'); 
             
 
@@ -1120,7 +1131,7 @@ self.onmessage = function (e) {
                 setProximaFecha('');
                 (async () => {
                     try {
-                        const filas = await traerBloques(fechaSel, loteActivo);
+                        const filas = await traerBloques(fechaSel, loteActivo, busquedaDif);
                         if (!vigente) return;
                         // Si hoy no hay nada que mostrar, el tótem avanza solo al próximo
                         // día con clases en vez de quedarse con la pantalla vacía.
@@ -1129,7 +1140,7 @@ self.onmessage = function (e) {
                             if (vigente && prox) { setSaltoAuto(fechaSel); setFechaSel(prox); return; }
                         }
                         setBloques(filas);
-                        if (!filas.length) {
+                        if (!filas.length && fechaSel !== TODOS_LOS_DIAS) {
                             const prox = await proximaFechaConClases(siguienteDiaISO(fechaSel), loteActivo);
                             if (vigente && prox) setProximaFecha(prox);
                         }
@@ -1140,7 +1151,14 @@ self.onmessage = function (e) {
                     }
                 })();
                 return () => { vigente = false; };
-            }, [fechaSel, loteActivo, hoyISO]);
+                // La búsqueda solo entra en la consulta cuando se ven todos los días;
+                // con una fecha concreta se filtra en el cliente y no hay que reconsultar.
+            }, [fechaSel, loteActivo, hoyISO, fechaSel === TODOS_LOS_DIAS ? busquedaDif : '']);
+
+            useEffect(() => {
+                const t = setTimeout(() => setBusquedaDif(searchTerm), 350);
+                return () => clearTimeout(t);
+            }, [searchTerm]);
 
             // Cuando la última clase del día ya terminó, la cartelera queda entera en
             // "REALIZADA" y deja de ser útil: el tótem pasa solo al próximo día con
@@ -1605,12 +1623,26 @@ self.onmessage = function (e) {
             // El tótem pide únicamente el día que está en pantalla. El índice
             // (lote, fecha) lo resuelve en milisegundos aunque la tabla guarde
             // cientos de miles de bloques.
-            const traerBloques = async (fecha, lote) => {
+            const COLS_BLOQUE = 'ev, seccion, denominacion, fecha, hora_inicio, hora_fin, salas, salas_nombre, docentes, tipo_recurso, modulos';
+
+            const traerBloques = async (fecha, lote, busqueda) => {
                 if (!window._sb || !lote || !fecha) return [];
-                const { data, error } = await window._sb
-                    .from('totem_bloques')
-                    .select('ev, seccion, denominacion, fecha, hora_inicio, hora_fin, salas, salas_nombre, docentes, tipo_recurso, modulos')
-                    .eq('lote', lote).eq('fecha', fecha).order('hora_inicio');
+                let q = window._sb.from('totem_bloques').select(COLS_BLOQUE).eq('lote', lote);
+                if (fecha === TODOS_LOS_DIAS) {
+                    q = q.gte('fecha', hoyISO).order('fecha').order('hora_inicio');
+                    // Los comodines y separadores de PostgREST se quitan del término.
+                    const t = String(busqueda || '').replace(/[,()*%\\]/g, ' ').trim();
+                    if (t.length >= 2) {
+                        const like = '%' + t + '%';
+                        q = q.or(['seccion.ilike.' + like, 'docentes.ilike.' + like,
+                                  'salas.ilike.' + like, 'denominacion.ilike.' + like].join(',')).limit(600);
+                    } else {
+                        q = q.lte('fecha', sumarDiasISO(hoyISO, DIAS_VENTANA_TODOS - 1)).limit(4000);
+                    }
+                } else {
+                    q = q.eq('fecha', fecha).order('hora_inicio');
+                }
+                const { data, error } = await q;
                 if (error) throw error;
                 return data || [];
             };
@@ -1906,30 +1938,36 @@ self.onmessage = function (e) {
             }, [clasesDelDia]);
 
             // ─── Navegación por fecha ───────────────────────────────────────
+            const verTodosLosDias = fechaSel === TODOS_LOS_DIAS;
             const fechaDesdeISO = (iso) => { const [a, m, d] = iso.split('-').map(Number); return new Date(a, m - 1, d); };
+            // Fecha legible ("Vie, 2 oct" / "Viernes, 2 de octubre") a partir de un ISO.
+            const textoFecha = (iso, largo) => {
+                if (!iso || iso === TODOS_LOS_DIAS) return '';
+                const t = fechaDesdeISO(iso).toLocaleDateString('es-CL', largo
+                    ? { weekday: 'long', day: 'numeric', month: 'long' }
+                    : { weekday: 'short', day: 'numeric', month: 'short' });
+                return t.charAt(0).toUpperCase() + t.slice(1);
+            };
             const desplazarFecha = (dias) => {
-                const d = fechaDesdeISO(fechaSel);
-                d.setDate(d.getDate() + dias);
-                const iso = isoDeFecha(d);
+                // Saliendo de "todos los días" se retoma desde hoy.
+                const iso = verTodosLosDias ? hoyISO : sumarDiasISO(fechaSel, dias);
                 navegacionManual.current = true;
                 setSaltoAuto('');
                 setFechaSel(iso);
                 trackAction('filters');
                 logEvento('filtro_fecha', { fecha: iso });
             };
-            const etiquetaFecha = useMemo(() => {
-                const txt = fechaDesdeISO(fechaSel).toLocaleDateString('es-CL', { weekday: 'short', day: 'numeric', month: 'short' });
-                return txt.charAt(0).toUpperCase() + txt.slice(1);
-            }, [fechaSel]);
-            const etiquetaFechaLarga = useMemo(() => {
-                const txt = fechaDesdeISO(fechaSel).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
-                return txt.charAt(0).toUpperCase() + txt.slice(1);
-            }, [fechaSel]);
-            const etiquetaProxima = useMemo(() => {
-                if (!proximaFecha) return '';
-                const txt = fechaDesdeISO(proximaFecha).toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
-                return txt.charAt(0).toUpperCase() + txt.slice(1);
-            }, [proximaFecha]);
+            const alternarTodosLosDias = () => {
+                const destino = verTodosLosDias ? hoyISO : TODOS_LOS_DIAS;
+                navegacionManual.current = true;
+                setSaltoAuto('');
+                setFechaSel(destino);
+                trackAction('filters');
+                logEvento('filtro_fecha', { fecha: destino });
+            };
+            const etiquetaFecha = useMemo(() => verTodosLosDias ? 'Todos los días' : textoFecha(fechaSel), [fechaSel, verTodosLosDias]);
+            const etiquetaFechaLarga = useMemo(() => textoFecha(fechaSel, true), [fechaSel]);
+            const etiquetaProxima = useMemo(() => textoFecha(proximaFecha, true), [proximaFecha]);
 
             const sortedFilteredData = useMemo(() => {
                 const searchLower = searchTerm.toLowerCase();
@@ -1965,11 +2003,17 @@ self.onmessage = function (e) {
                     filtered.push({ item, prio: getPriority(statusInfo) });
                 }
                 filtered.sort((a, b) => {
+                    // Viendo varios días, el orden natural es cronológico; la prioridad
+                    // por estado solo tiene sentido dentro de un mismo día.
+                    if (verTodosLosDias) {
+                        if (a.item.fecha !== b.item.fecha) return a.item.fecha < b.item.fecha ? -1 : 1;
+                        return a.item.horaInicio.localeCompare(b.item.horaInicio);
+                    }
                     if (a.prio !== b.prio) return a.prio - b.prio;
                     return a.item.horaInicio.localeCompare(b.item.horaInicio);
                 });
                 return filtered.map(f => f.item);
-            }, [clasesDelDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, hoyISO, filterTime]);
+            }, [clasesDelDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, hoyISO, filterTime, verTodosLosDias]);
 
             // Opciones disponibles para los filtros de la vista de exámenes (carrera/nivel/jornada).
             const examenOpciones = useMemo(() => {
@@ -2522,10 +2566,20 @@ self.onmessage = function (e) {
                     );
                 }
 
-                const airportData = data.filter(item => {
-                    const st = getClaseStatus(item);
-                    return st.isImportant;
-                }).sort((a, b) => a.horaInicio.localeCompare(b.horaInicio));
+                // El salvapantallas prioriza lo que está ocurriendo ahora.
+                const activasAhora = clasesDelDia
+                    .filter(item => getClaseStatus(item).isImportant)
+                    .sort((a, b) => a.horaInicio.localeCompare(b.horaInicio));
+                // Fuera del horario de clases —o en un día sin ninguna— la pantalla
+                // quedaría vacía toda la jornada, así que muestra lo que viene con su
+                // fecha: lo que resta de hoy o directamente el próximo día con clases.
+                const horaAhora = String(filterTime.getHours()).padStart(2, '0') + ':' + String(filterTime.getMinutes()).padStart(2, '0');
+                const proximasClases = clasesDelDia
+                    .filter(c => c.fecha > hoyISO || (c.fecha === hoyISO && c.horaFin > horaAhora))
+                    .sort((a, b) => a.fecha !== b.fecha ? (a.fecha < b.fecha ? -1 : 1) : a.horaInicio.localeCompare(b.horaInicio))
+                    .slice(0, 40);
+                const mostrandoFuturas = activasAhora.length === 0;
+                const airportData = mostrandoFuturas ? proximasClases : activasAhora;
 
                 return (
                     <div className="app-shell w-screen bg-duoc-blue dark:bg-duoc-darker text-white flex flex-col cursor-pointer overflow-hidden animate-fade-in" onClick={() => setShowSuspension(false)}>
@@ -2535,8 +2589,10 @@ self.onmessage = function (e) {
                                     <Icons.Building cls="w-10 h-10 text-duoc-yellow" />
                                 </div>
                                 <div className="flex flex-col">
-                                    <h1 className="text-2xl lg:text-4xl font-black tracking-wide text-white uppercase">Busca Tu Clase</h1>
-                                    <p className="text-sm lg:text-xl text-blue-200 dark:text-slate-400 mt-1 font-medium tracking-wide">Estado de clases en tiempo real. Toque para salir.</p>
+                                    <h1 className="text-2xl lg:text-4xl font-black tracking-wide text-white uppercase">{mostrandoFuturas ? 'Próximas Clases' : 'Busca Tu Clase'}</h1>
+                                    <p className="text-sm lg:text-xl text-blue-200 dark:text-slate-400 mt-1 font-medium tracking-wide">
+                                        {mostrandoFuturas ? 'Hoy ya no quedan clases. Toque para salir.' : 'Estado de clases en tiempo real. Toque para salir.'}
+                                    </p>
                                 </div>
                             </div>
                             <div className="text-right">
@@ -2560,8 +2616,9 @@ self.onmessage = function (e) {
 
                         <div ref={suspensionScrollRef} className="flex-1 overflow-y-auto custom-scrollbar lg:pb-32 pb-10">
                             {airportData.length === 0 ? (
-                                <div className="h-full flex items-center justify-center text-xl lg:text-3xl text-blue-200/50 font-bold p-8 text-center">
-                                    No hay actividad de clases en este momento.
+                                <div className="h-full flex flex-col items-center justify-center gap-4 text-blue-200/50 font-bold p-8 text-center">
+                                    <Icons.Calendar cls="w-20 h-20 lg:w-28 lg:h-28 text-white/10" />
+                                    <span className="text-xl lg:text-3xl">No hay clases programadas próximamente.</span>
                                 </div>
                             ) : (
                                 <div className="divide-y divide-white/5">
@@ -2570,14 +2627,26 @@ self.onmessage = function (e) {
                                         return (
                                             <div key={idx} className="flex flex-col lg:flex-row px-6 py-4 lg:px-12 lg:py-6 items-start lg:items-center hover:bg-white/5 transition-colors gap-2 lg:gap-0">
                                                 <div className="w-full flex justify-between lg:hidden mb-2 items-center">
-                                                     <span className="text-lg font-black text-white tabular-nums"><Icons.Clock cls="w-4 h-4 inline mr-1 text-duoc-yellow" />{clase.horaInicio} - {clase.horaFin}</span>
+                                                     <span className="text-lg font-black text-white tabular-nums flex flex-col">
+                                                        <span><Icons.Clock cls="w-4 h-4 inline mr-1 text-duoc-yellow" />{clase.horaInicio} - {clase.horaFin}</span>
+                                                        {/* La fecha solo aparece cuando la clase no es de hoy, para que
+                                                            nadie confunda una clase futura con una de la jornada actual. */}
+                                                        {clase.fecha !== hoyISO && (
+                                                            <span className="text-xs font-bold text-duoc-yellow normal-case mt-0.5">{textoFecha(clase.fecha)}</span>
+                                                        )}
+                                                     </span>
                                                      <span className={`px-3 py-1 rounded-lg text-xs font-black border flex items-center gap-1 ${status.bg} ${status.text} ${status.border}`}>
                                                           {status.isImportant && <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse"></span>}
                                                          {status.texto}
                                                      </span>
                                                 </div>
-                                                
-                                                <div className="hidden lg:block w-44 shrink-0 text-xl font-black text-white tabular-nums">{clase.horaInicio} - {clase.horaFin}</div>
+
+                                                <div className="hidden lg:flex w-44 shrink-0 flex-col text-xl font-black text-white tabular-nums">
+                                                    <span>{clase.horaInicio} - {clase.horaFin}</span>
+                                                    {clase.fecha !== hoyISO && (
+                                                        <span className="text-sm font-bold text-duoc-yellow mt-0.5">{textoFecha(clase.fecha)}</span>
+                                                    )}
+                                                </div>
                                                 
                                                 <div className="hidden lg:block w-48 shrink-0 pr-4">
                                                     <span className="inline-block text-lg font-bold text-blue-100 dark:text-slate-300 bg-black/40 px-3 py-1.5 rounded-lg border border-white/10">{clase.seccion}</span>
@@ -2734,6 +2803,13 @@ self.onmessage = function (e) {
                                         </button>
                                     )}
 
+                                    <button onClick={alternarTodosLosDias} disabled={activeFilter !== 'ALL'} title="Ver las clases de todas las fechas"
+                                        className={`shrink-0 px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl text-sm lg:text-lg font-black border-2 lg:border-[3px] transition-colors disabled:opacity-50 disabled:pointer-events-none ${verTodosLosDias
+                                            ? 'bg-duoc-lightblue dark:bg-duoc-yellow text-white dark:text-duoc-blue border-duoc-lightblue dark:border-duoc-yellow'
+                                            : 'bg-slate-50 dark:bg-slate-800 text-duoc-blue dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-duoc-lightblue dark:hover:border-duoc-yellow'}`}>
+                                        Todos los días
+                                    </button>
+
                                     <select value={selectedSigla} onChange={(e) => { setSelectedSigla(e.target.value); trackAction('filters'); logEvento('filtro_seccion', {seccion: e.target.value || 'todas'}); }} className="flex-1 lg:flex-[1] min-w-[120px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm lg:text-lg font-semibold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer truncate transition-colors">
                                         <option value="">Siglas (Todas)</option>
                                         {opcionesDia.siglas.map(sig => <option key={sig} value={sig}>{sig}</option>)}
@@ -2750,6 +2826,18 @@ self.onmessage = function (e) {
                             <main className="flex-1 flex flex-col p-3 lg:p-6 overflow-hidden">
                                 {/* El tótem avanzó solo porque hoy ya no queda nada por mostrar.
                                     Se avisa para que nadie crea que está viendo el día de hoy. */}
+                                {/* Sin búsqueda, "todos los días" trae una ventana acotada; con
+                                    búsqueda el filtro va al servidor y alcanza cualquier fecha. */}
+                                {verTodosLosDias && bloques.length > 0 && (
+                                    <div className="mb-3 flex items-center gap-3 rounded-xl lg:rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-4 py-2.5 shrink-0">
+                                        <Icons.Calendar cls="w-5 h-5 text-duoc-lightblue dark:text-duoc-yellow shrink-0" />
+                                        <p className="text-sm lg:text-base font-bold text-slate-600 dark:text-slate-300">
+                                            {busquedaDif.trim().length >= 2
+                                                ? `Buscando "${busquedaDif.trim()}" en todas las fechas.`
+                                                : `Mostrando los próximos ${DIAS_VENTANA_TODOS} días. Usa el buscador para encontrar una clase en cualquier fecha.`}
+                                        </p>
+                                    </div>
+                                )}
                                 {saltoAuto && fechaSel !== hoyISO && (
                                     <div className="mb-3 flex items-center gap-3 rounded-xl lg:rounded-2xl border-2 border-duoc-yellow bg-duoc-yellow/15 dark:bg-duoc-yellow/10 px-4 py-3 shrink-0">
                                         <Icons.Calendar cls="w-5 h-5 lg:w-6 lg:h-6 text-duoc-blue dark:text-duoc-yellow shrink-0" />
@@ -2784,7 +2872,11 @@ self.onmessage = function (e) {
                                                 </div>
                                                 <h2 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-slate-300 mb-2 lg:mb-3">Sin clases programadas</h2>
                                                 <p className="text-base lg:text-lg font-medium text-slate-500 dark:text-slate-400 max-w-lg mb-6">
-                                                    No hay clases registradas para el {etiquetaFecha.toLowerCase()}.
+                                                    {verTodosLosDias
+                                                        ? (busquedaDif.trim().length >= 2
+                                                            ? `No encontramos clases que coincidan con "${busquedaDif.trim()}" en ninguna fecha.`
+                                                            : 'No hay clases registradas en los próximos días.')
+                                                        : `No hay clases registradas para el ${etiquetaFecha.toLowerCase()}.`}
                                                 </p>
                                                 {proximaFecha && (
                                                     <button onClick={() => { navegacionManual.current = true; setSaltoAuto(''); setFechaSel(proximaFecha); trackAction('buttons'); logEvento('salto_proxima_fecha', { fecha: proximaFecha }); }}
@@ -2819,9 +2911,24 @@ self.onmessage = function (e) {
                                                     const isPorTerminar = status.texto === '¡POR FINALIZAR!';
                                                     const highlight = isEnCurso || isPorEmpezar || isPorTerminar;
                                                     const sinRecinto = clase.sala === 'Sin recinto';
+                                                    // Viendo varias fechas, cada día se abre con su propia fila,
+                                                    // para no perder de vista a qué día pertenece cada clase.
+                                                    const abreFecha = verTodosLosDias && (idx === 0 || sortedFilteredData[idx - 1].fecha !== clase.fecha);
 
                                                     return (
-                                                        <div key={idx} className={`cv-row flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none ${highlight ? 'bg-white lg:bg-slate-50/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-slate-800'}`}>
+                                                      <React.Fragment key={idx}>
+                                                        {abreFecha && (
+                                                            <div className="cv-row sticky top-0 z-10 flex items-center gap-2 px-4 lg:px-8 py-2.5 bg-slate-100 dark:bg-slate-800 border-y border-slate-200 dark:border-slate-700 mb-2 lg:mb-0 rounded-lg lg:rounded-none">
+                                                                <Icons.Calendar cls="w-4 h-4 lg:w-5 lg:h-5 text-duoc-lightblue dark:text-duoc-yellow shrink-0" />
+                                                                <span className="text-sm lg:text-lg font-black text-duoc-blue dark:text-duoc-yellow">
+                                                                    {textoFecha(clase.fecha, true)}
+                                                                </span>
+                                                                {clase.fecha === hoyISO && (
+                                                                    <span className="text-[11px] lg:text-xs font-black px-2 py-0.5 rounded-md bg-duoc-lightblue dark:bg-duoc-yellow text-white dark:text-duoc-blue">HOY</span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                        <div className={`cv-row flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none ${highlight ? 'bg-white lg:bg-slate-50/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-slate-800'}`}>
                                                             
                                                             {/* MOBILE: Top Row (Hora + Estado) */}
                                                             <div className="w-full flex lg:hidden justify-between items-center mb-2">
@@ -2901,6 +3008,7 @@ self.onmessage = function (e) {
                                                                 </span>
                                                             </div>
                                                         </div>
+                                                      </React.Fragment>
                                                     );
                                                 })}
                                             </div>
