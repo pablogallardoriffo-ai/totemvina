@@ -570,12 +570,12 @@ self.onmessage = function (e) {
             };
             const siguienteDiaISO = (iso) => sumarDiasISO(iso, 1);
             // Valor especial de fechaSel: en vez de un día concreto, la cartelera
-            // muestra todo lo que viene desde hoy.
-            const TODOS_LOS_DIAS = 'TODOS';
-            // Sin búsqueda, "todos los días" se acota a esta ventana: traer el semestre
-            // entero serían decenas de miles de bloques. Al buscar, el filtro se hace en
-            // el servidor y sí abarca todas las fechas.
-            const DIAS_VENTANA_TODOS = 7;
+            // recorre todas las fechas desde hoy en adelante.
+            const TODAS_LAS_FECHAS = 'TODAS';
+            // El semestre completo son decenas de miles de bloques, así que la vista sin
+            // filtrar se corta aquí y se avisa en pantalla. Al buscar, el filtro se
+            // resuelve en el servidor y sí recorre el semestre entero.
+            const TOPE_TODAS_FECHAS = 3000;
             const hoyISO = isoDeFecha(filterTime);
             const [fechaSel, setFechaSel] = useState(hoyISO);
             const [selectedJornada, setSelectedJornada] = useState('');
@@ -1140,7 +1140,7 @@ self.onmessage = function (e) {
                             if (vigente && prox) { setSaltoAuto(fechaSel); setFechaSel(prox); return; }
                         }
                         setBloques(filas);
-                        if (!filas.length && fechaSel !== TODOS_LOS_DIAS) {
+                        if (!filas.length && fechaSel !== TODAS_LAS_FECHAS) {
                             const prox = await proximaFechaConClases(siguienteDiaISO(fechaSel), loteActivo);
                             if (vigente && prox) setProximaFecha(prox);
                         }
@@ -1153,7 +1153,7 @@ self.onmessage = function (e) {
                 return () => { vigente = false; };
                 // La búsqueda solo entra en la consulta cuando se ven todos los días;
                 // con una fecha concreta se filtra en el cliente y no hay que reconsultar.
-            }, [fechaSel, loteActivo, hoyISO, fechaSel === TODOS_LOS_DIAS ? busquedaDif : '']);
+            }, [fechaSel, loteActivo, hoyISO, fechaSel === TODAS_LAS_FECHAS ? busquedaDif : '']);
 
             useEffect(() => {
                 const t = setTimeout(() => setBusquedaDif(searchTerm), 350);
@@ -1628,7 +1628,7 @@ self.onmessage = function (e) {
             const traerBloques = async (fecha, lote, busqueda) => {
                 if (!window._sb || !lote || !fecha) return [];
                 let q = window._sb.from('totem_bloques').select(COLS_BLOQUE).eq('lote', lote);
-                if (fecha === TODOS_LOS_DIAS) {
+                if (fecha === TODAS_LAS_FECHAS) {
                     q = q.gte('fecha', hoyISO).order('fecha').order('hora_inicio');
                     // Los comodines y separadores de PostgREST se quitan del término.
                     const t = String(busqueda || '').replace(/[,()*%\\]/g, ' ').trim();
@@ -1637,7 +1637,7 @@ self.onmessage = function (e) {
                         q = q.or(['seccion.ilike.' + like, 'docentes.ilike.' + like,
                                   'salas.ilike.' + like, 'denominacion.ilike.' + like].join(',')).limit(600);
                     } else {
-                        q = q.lte('fecha', sumarDiasISO(hoyISO, DIAS_VENTANA_TODOS - 1)).limit(4000);
+                        q = q.limit(TOPE_TODAS_FECHAS);
                     }
                 } else {
                     q = q.eq('fecha', fecha).order('hora_inicio');
@@ -1938,34 +1938,38 @@ self.onmessage = function (e) {
             }, [clasesDelDia]);
 
             // ─── Navegación por fecha ───────────────────────────────────────
-            const verTodosLosDias = fechaSel === TODOS_LOS_DIAS;
+            const verTodasLasFechas = fechaSel === TODAS_LAS_FECHAS;
             const fechaDesdeISO = (iso) => { const [a, m, d] = iso.split('-').map(Number); return new Date(a, m - 1, d); };
             // Fecha legible ("Vie, 2 oct" / "Viernes, 2 de octubre") a partir de un ISO.
             const textoFecha = (iso, largo) => {
-                if (!iso || iso === TODOS_LOS_DIAS) return '';
+                if (!iso || iso === TODAS_LAS_FECHAS) return '';
                 const t = fechaDesdeISO(iso).toLocaleDateString('es-CL', largo
                     ? { weekday: 'long', day: 'numeric', month: 'long' }
                     : { weekday: 'short', day: 'numeric', month: 'short' });
                 return t.charAt(0).toUpperCase() + t.slice(1);
             };
-            const desplazarFecha = (dias) => {
-                // Saliendo de "todos los días" se retoma desde hoy.
-                const iso = verTodosLosDias ? hoyISO : sumarDiasISO(fechaSel, dias);
+            // Elegir fecha a mano apaga el avance automático hasta que la inactividad
+            // devuelva el tótem a su estado base.
+            const elegirFecha = (valor) => {
                 navegacionManual.current = true;
                 setSaltoAuto('');
-                setFechaSel(iso);
+                setFechaSel(valor);
                 trackAction('filters');
-                logEvento('filtro_fecha', { fecha: iso });
+                logEvento('filtro_fecha', { fecha: valor });
             };
-            const alternarTodosLosDias = () => {
-                const destino = verTodosLosDias ? hoyISO : TODOS_LOS_DIAS;
-                navegacionManual.current = true;
-                setSaltoAuto('');
-                setFechaSel(destino);
-                trackAction('filters');
-                logEvento('filtro_fecha', { fecha: destino });
-            };
-            const etiquetaFecha = useMemo(() => verTodosLosDias ? 'Todos los días' : textoFecha(fechaSel), [fechaSel, verTodosLosDias]);
+            // Saliendo de "todas las fechas", las flechas retoman desde hoy.
+            const desplazarFecha = (dias) => elegirFecha(verTodasLasFechas ? hoyISO : sumarDiasISO(fechaSel, dias));
+
+            // Opciones del desplegable: "Todas las fechas" más los días que la vista
+            // tiene cargados. En modo todas las fechas eso es la lista real de días con
+            // clases, así que el filtro sirve además para saltar directo a uno.
+            const opcionesFecha = useMemo(() => {
+                const set = new Set(bloques.map(b => b.fecha));
+                set.add(hoyISO);
+                if (!verTodasLasFechas) set.add(fechaSel);
+                return [...set].filter(Boolean).sort();
+            }, [bloques, fechaSel, hoyISO, verTodasLasFechas]);
+            const etiquetaFecha = useMemo(() => verTodasLasFechas ? 'Todas las fechas' : textoFecha(fechaSel), [fechaSel, verTodasLasFechas]);
             const etiquetaFechaLarga = useMemo(() => textoFecha(fechaSel, true), [fechaSel]);
             const etiquetaProxima = useMemo(() => textoFecha(proximaFecha, true), [proximaFecha]);
 
@@ -2005,7 +2009,7 @@ self.onmessage = function (e) {
                 filtered.sort((a, b) => {
                     // Viendo varios días, el orden natural es cronológico; la prioridad
                     // por estado solo tiene sentido dentro de un mismo día.
-                    if (verTodosLosDias) {
+                    if (verTodasLasFechas) {
                         if (a.item.fecha !== b.item.fecha) return a.item.fecha < b.item.fecha ? -1 : 1;
                         return a.item.horaInicio.localeCompare(b.item.horaInicio);
                     }
@@ -2013,7 +2017,7 @@ self.onmessage = function (e) {
                     return a.item.horaInicio.localeCompare(b.item.horaInicio);
                 });
                 return filtered.map(f => f.item);
-            }, [clasesDelDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, hoyISO, filterTime, verTodosLosDias]);
+            }, [clasesDelDia, selectedJornada, selectedEscuela, selectedSigla, searchTerm, activeFilter, hoyISO, filterTime, verTodasLasFechas]);
 
             // Opciones disponibles para los filtros de la vista de exámenes (carrera/nivel/jornada).
             const examenOpciones = useMemo(() => {
@@ -2789,26 +2793,25 @@ self.onmessage = function (e) {
                                     <div className={`flex items-center shrink-0 bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] rounded-xl lg:rounded-2xl transition-colors ${activeFilter !== 'ALL' ? 'opacity-50 border-slate-200 dark:border-slate-700' : fechaSel === hoyISO ? 'border-slate-200 dark:border-slate-700' : 'border-duoc-lightblue dark:border-duoc-yellow'}`}>
                                         <button onClick={() => desplazarFecha(-1)} disabled={activeFilter !== 'ALL'} aria-label="Día anterior"
                                             className="px-3 py-2.5 lg:py-3 text-xl leading-none font-black text-duoc-blue dark:text-slate-200 hover:text-duoc-lightblue dark:hover:text-duoc-yellow disabled:pointer-events-none transition-colors">‹</button>
-                                        <div className="min-w-[124px] lg:min-w-[150px] text-center text-sm lg:text-lg font-bold text-duoc-blue dark:text-slate-200 whitespace-nowrap px-1">
-                                            {fechaSel === hoyISO ? `👉 Hoy, ${etiquetaFecha}` : etiquetaFecha}
-                                        </div>
+                                        {/* El propio filtro de fecha ofrece "Todas las fechas"; las
+                                            flechas siguen sirviendo para moverse día a día. */}
+                                        <select value={fechaSel} onChange={(e) => elegirFecha(e.target.value)} disabled={activeFilter !== 'ALL'}
+                                            className="min-w-[150px] lg:min-w-[186px] bg-transparent text-center text-sm lg:text-lg font-bold text-duoc-blue dark:text-slate-200 py-2.5 lg:py-3 px-1 outline-none cursor-pointer disabled:pointer-events-none appearance-none">
+                                            <option value={TODAS_LAS_FECHAS}>📅 Todas las fechas</option>
+                                            {opcionesFecha.map(f => (
+                                                <option key={f} value={f}>{f === hoyISO ? `👉 Hoy, ${textoFecha(f)}` : textoFecha(f)}</option>
+                                            ))}
+                                        </select>
                                         <button onClick={() => desplazarFecha(1)} disabled={activeFilter !== 'ALL'} aria-label="Día siguiente"
                                             className="px-3 py-2.5 lg:py-3 text-xl leading-none font-black text-duoc-blue dark:text-slate-200 hover:text-duoc-lightblue dark:hover:text-duoc-yellow disabled:pointer-events-none transition-colors">›</button>
                                     </div>
 
                                     {fechaSel !== hoyISO && (
-                                        <button onClick={() => { navegacionManual.current = true; setSaltoAuto(''); setFechaSel(hoyISO); trackAction('filters'); }}
+                                        <button onClick={() => elegirFecha(hoyISO)}
                                             className="shrink-0 px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue text-sm lg:text-lg font-black hover:opacity-90 transition-opacity">
                                             Hoy
                                         </button>
                                     )}
-
-                                    <button onClick={alternarTodosLosDias} disabled={activeFilter !== 'ALL'} title="Ver las clases de todas las fechas"
-                                        className={`shrink-0 px-4 py-2.5 lg:py-3 rounded-xl lg:rounded-2xl text-sm lg:text-lg font-black border-2 lg:border-[3px] transition-colors disabled:opacity-50 disabled:pointer-events-none ${verTodosLosDias
-                                            ? 'bg-duoc-lightblue dark:bg-duoc-yellow text-white dark:text-duoc-blue border-duoc-lightblue dark:border-duoc-yellow'
-                                            : 'bg-slate-50 dark:bg-slate-800 text-duoc-blue dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-duoc-lightblue dark:hover:border-duoc-yellow'}`}>
-                                        Todos los días
-                                    </button>
 
                                     <select value={selectedSigla} onChange={(e) => { setSelectedSigla(e.target.value); trackAction('filters'); logEvento('filtro_seccion', {seccion: e.target.value || 'todas'}); }} className="flex-1 lg:flex-[1] min-w-[120px] bg-slate-50 dark:bg-slate-800 border-2 lg:border-[3px] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-sm lg:text-lg font-semibold py-2.5 lg:py-3 px-3 rounded-xl lg:rounded-2xl outline-none focus:border-duoc-lightblue dark:focus:border-duoc-yellow cursor-pointer truncate transition-colors">
                                         <option value="">Siglas (Todas)</option>
@@ -2828,13 +2831,15 @@ self.onmessage = function (e) {
                                     Se avisa para que nadie crea que está viendo el día de hoy. */}
                                 {/* Sin búsqueda, "todos los días" trae una ventana acotada; con
                                     búsqueda el filtro va al servidor y alcanza cualquier fecha. */}
-                                {verTodosLosDias && bloques.length > 0 && (
+                                {verTodasLasFechas && bloques.length > 0 && (
                                     <div className="mb-3 flex items-center gap-3 rounded-xl lg:rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-4 py-2.5 shrink-0">
                                         <Icons.Calendar cls="w-5 h-5 text-duoc-lightblue dark:text-duoc-yellow shrink-0" />
                                         <p className="text-sm lg:text-base font-bold text-slate-600 dark:text-slate-300">
                                             {busquedaDif.trim().length >= 2
-                                                ? `Buscando "${busquedaDif.trim()}" en todas las fechas.`
-                                                : `Mostrando los próximos ${DIAS_VENTANA_TODOS} días. Usa el buscador para encontrar una clase en cualquier fecha.`}
+                                                ? `Buscando "${busquedaDif.trim()}" en todas las fechas desde hoy.`
+                                                : bloques.length >= TOPE_TODAS_FECHAS
+                                                    ? `Son demasiadas clases para mostrarlas todas: se listan las ${TOPE_TODAS_FECHAS.toLocaleString('es-CL')} más próximas. Usa el buscador para encontrar una en cualquier fecha.`
+                                                    : 'Mostrando todas las fechas desde hoy.'}
                                         </p>
                                     </div>
                                 )}
@@ -2849,6 +2854,8 @@ self.onmessage = function (e) {
                                 <div className="flex-1 flex flex-col bg-white dark:bg-duoc-card lg:rounded-[1.5rem] rounded-xl shadow-md border border-slate-200 dark:border-slate-700 overflow-hidden transition-colors duration-300">
                                     
                                     <div className="hidden lg:flex text-duoc-blue dark:text-slate-300 bg-slate-100/80 dark:bg-slate-800/80 px-8 py-4 shrink-0 text-sm font-black uppercase tracking-widest border-b-[3px] border-slate-200 dark:border-slate-700 transition-colors duration-300">
+                                        {/* La fecha solo es una columna cuando conviven varias en la lista. */}
+                                        {verTodasLasFechas && <div className="w-40 shrink-0">Fecha</div>}
                                         <div className="w-44 shrink-0">Horario</div>
                                         <div className="w-48 shrink-0 pr-4">Sigla</div>
                                         <div className="flex-[1.5] min-w-0 pr-6">Asignatura</div>
@@ -2872,10 +2879,10 @@ self.onmessage = function (e) {
                                                 </div>
                                                 <h2 className="text-xl lg:text-2xl font-black text-duoc-blue dark:text-slate-300 mb-2 lg:mb-3">Sin clases programadas</h2>
                                                 <p className="text-base lg:text-lg font-medium text-slate-500 dark:text-slate-400 max-w-lg mb-6">
-                                                    {verTodosLosDias
+                                                    {verTodasLasFechas
                                                         ? (busquedaDif.trim().length >= 2
                                                             ? `No encontramos clases que coincidan con "${busquedaDif.trim()}" en ninguna fecha.`
-                                                            : 'No hay clases registradas en los próximos días.')
+                                                            : 'No hay clases registradas en ninguna fecha próxima.')
                                                         : `No hay clases registradas para el ${etiquetaFecha.toLowerCase()}.`}
                                                 </p>
                                                 {proximaFecha && (
@@ -2911,25 +2918,11 @@ self.onmessage = function (e) {
                                                     const isPorTerminar = status.texto === '¡POR FINALIZAR!';
                                                     const highlight = isEnCurso || isPorEmpezar || isPorTerminar;
                                                     const sinRecinto = clase.sala === 'Sin recinto';
-                                                    // Viendo varias fechas, cada día se abre con su propia fila,
-                                                    // para no perder de vista a qué día pertenece cada clase.
-                                                    const abreFecha = verTodosLosDias && (idx === 0 || sortedFilteredData[idx - 1].fecha !== clase.fecha);
+                                                    const esHoy = clase.fecha === hoyISO;
 
                                                     return (
-                                                      <React.Fragment key={idx}>
-                                                        {abreFecha && (
-                                                            <div className="cv-row sticky top-0 z-10 flex items-center gap-2 px-4 lg:px-8 py-2.5 bg-slate-100 dark:bg-slate-800 border-y border-slate-200 dark:border-slate-700 mb-2 lg:mb-0 rounded-lg lg:rounded-none">
-                                                                <Icons.Calendar cls="w-4 h-4 lg:w-5 lg:h-5 text-duoc-lightblue dark:text-duoc-yellow shrink-0" />
-                                                                <span className="text-sm lg:text-lg font-black text-duoc-blue dark:text-duoc-yellow">
-                                                                    {textoFecha(clase.fecha, true)}
-                                                                </span>
-                                                                {clase.fecha === hoyISO && (
-                                                                    <span className="text-[11px] lg:text-xs font-black px-2 py-0.5 rounded-md bg-duoc-lightblue dark:bg-duoc-yellow text-white dark:text-duoc-blue">HOY</span>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                        <div className={`cv-row flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none ${highlight ? 'bg-white lg:bg-slate-50/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-slate-800'}`}>
-                                                            
+                                                        <div key={idx} className={`cv-row flex flex-col lg:flex-row px-4 py-4 lg:px-8 lg:py-4 items-start lg:items-center transition-colors rounded-xl lg:rounded-none mb-3 lg:mb-0 shadow-sm lg:shadow-none border lg:border-none ${highlight ? 'bg-white lg:bg-slate-50/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-duoc-card hover:bg-slate-50 dark:hover:bg-slate-800/50 border-slate-200 dark:border-slate-800'}`}>
+
                                                             {/* MOBILE: Top Row (Hora + Estado) */}
                                                             <div className="w-full flex lg:hidden justify-between items-center mb-2">
                                                                 <span className="text-base font-black text-slate-800 dark:text-slate-200 tabular-nums tracking-tight flex items-center gap-1.5">
@@ -2941,6 +2934,23 @@ self.onmessage = function (e) {
                                                                     {status.texto}
                                                                 </span>
                                                             </div>
+
+                                                            {/* MOBILE: la fecha va arriba, porque sin columnas no hay dónde ponerla */}
+                                                            {verTodasLasFechas && (
+                                                                <div className="w-full flex lg:hidden items-center gap-1.5 mb-2">
+                                                                    <Icons.Calendar cls="w-3.5 h-3.5 text-duoc-lightblue dark:text-duoc-yellow shrink-0" />
+                                                                    <span className="text-xs font-black text-duoc-lightblue dark:text-duoc-yellow">{textoFecha(clase.fecha, true)}</span>
+                                                                    {esHoy && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-duoc-lightblue dark:bg-duoc-yellow text-white dark:text-duoc-blue">HOY</span>}
+                                                                </div>
+                                                            )}
+
+                                                            {/* DESKTOP: Fecha */}
+                                                            {verTodasLasFechas && (
+                                                                <div className="hidden lg:flex w-40 shrink-0 flex-col justify-center pr-3">
+                                                                    <span className="text-base font-black text-duoc-blue dark:text-duoc-yellow leading-tight">{textoFecha(clase.fecha)}</span>
+                                                                    {esHoy && <span className="mt-0.5 text-[10px] font-black px-1.5 py-0.5 rounded bg-duoc-lightblue dark:bg-duoc-yellow text-white dark:text-duoc-blue self-start">HOY</span>}
+                                                                </div>
+                                                            )}
 
                                                             {/* DESKTOP: Horario */}
                                                             <div className="hidden lg:flex w-44 shrink-0 flex-col justify-center text-lg font-black text-slate-800 dark:text-slate-200">
@@ -3008,7 +3018,6 @@ self.onmessage = function (e) {
                                                                 </span>
                                                             </div>
                                                         </div>
-                                                      </React.Fragment>
                                                     );
                                                 })}
                                             </div>
