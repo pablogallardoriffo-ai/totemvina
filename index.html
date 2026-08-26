@@ -485,6 +485,10 @@ self.onmessage = function (e) {
             const [passwordAction, setPasswordAction] = useState(null);
             const [passwordInput, setPasswordInput] = useState('');
             const [passwordError, setPasswordError] = useState(false);
+            // La validación ahora va y vuelve del servidor: hay que poder mostrar
+            // "comprobando…" y el motivo real del rechazo (clave o bloqueo por intentos).
+            const [passwordBusy, setPasswordBusy] = useState(false);
+            const [passwordMsg, setPasswordMsg] = useState('');
             const authorizedFullscreenExit = useRef(false);
             const [kioskLocked, setKioskLocked] = useState(false);
             
@@ -512,7 +516,13 @@ self.onmessage = function (e) {
             const [emailModal, setEmailModal] = useState({ show: false, target: '', status: 'idle', errorMsg: '' });
             const [analytics, setAnalytics] = useState({ loaded: false, totals: { interacciones: 0, clicks: 0, filtros: 0, botones: 0, sesiones: 0, eventos: 0 }, porDia: {}, porTipo: {}, eventos: [] });
             const [periodo, setPeriodo] = useState('dia');
-            const [adminPin, setAdminPin] = useState('010203');
+            // ─── Sesión de administración ───────────────────────────────────
+            // La clave maestra NO vive en el navegador. Se envía al servidor, que la
+            // compara contra un hash bcrypt y devuelve un token de sesión temporal.
+            // Ese token es lo único que autoriza las escrituras del panel y solo
+            // existe en memoria: al recargar la pestaña hay que volver a ingresarla.
+            const adminToken = useRef(null);
+            const [adminSesion, setAdminSesion] = useState(false);
             const [pinChange, setPinChange] = useState({ current: '', next: '', confirm: '', status: 'idle', msg: '' });
             const [sabanaInfo, setSabanaInfo] = useState({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
             // Bloques de clase del día en pantalla, ya consolidados en la importación.
@@ -590,7 +600,33 @@ self.onmessage = function (e) {
 
             const safeStorage = {
                 getItem: (key) => { try { return localStorage.getItem(key); } catch(e) { return null; } },
-                setItem: (key, value) => { try { localStorage.setItem(key, value); } catch(e) { console.warn("Storage bloqueado"); } }
+                setItem: (key, value) => { try { localStorage.setItem(key, value); } catch(e) { console.warn("Storage bloqueado"); } },
+                removeItem: (key) => { try { localStorage.removeItem(key); } catch(e) {} }
+            };
+
+            const cerrarSesionAdmin = (avisarServidor) => {
+                const t = adminToken.current;
+                adminToken.current = null;
+                setAdminSesion(false);
+                if (avisarServidor && t && window._sb) {
+                    window._sb.rpc('totem_admin_logout', { p_token: t }).then(() => {}, () => {});
+                }
+            };
+
+            // Toda escritura del panel pasa por una función del servidor que exige el
+            // token de sesión. Si el servidor lo rechaza (venció o se cerró desde otro
+            // dispositivo al cambiar la clave), aquí también se da por terminada.
+            const rpcAdmin = async (fn, args) => {
+                if (!window._sb) throw new Error('SIN_CONEXION');
+                if (!adminToken.current) throw new Error('SESION_ADMIN_INVALIDA');
+                const { data, error } = await window._sb.rpc(
+                    fn, Object.assign({ p_token: adminToken.current }, args || {})
+                );
+                if (error) {
+                    if (/SESION_ADMIN_INVALIDA/.test(error.message || '')) cerrarSesionAdmin(false);
+                    throw error;
+                }
+                return data;
             };
 
             const syncMetricas = () => {
@@ -906,12 +942,18 @@ self.onmessage = function (e) {
                         if (activeTab === 'ADMIN') {
                             setActiveTab('CARTELERA');
                             setAdminSubTab('DASHBOARD');
+                            // El tótem queda desatendido: la sesión de administración
+                            // no debe sobrevivir a la inactividad.
+                            cerrarSesionAdmin(true);
+                            setSurveys([]);
                         }
                         setShowPasswordModal(false);
                         setShowSurveyModal(false);
                         setShowQrModal(false);
                         setEmailModal({ show: false, target: '', status: 'idle', errorMsg: '' });
                         setPasswordInput('');
+                        setPasswordMsg('');
+                        setPasswordError(false);
                     }, Math.min(1800, Math.max(10, suspensionSeg)) * 1000);
                 };
 
@@ -936,6 +978,16 @@ self.onmessage = function (e) {
                     window.removeEventListener('click', resetTimer);
                 };
             }, [activeTab, showPasswordModal, showSurveyModal, showQrModal, emailModal.show, kioskLocked, suspensionSeg]);
+
+            // Si el servidor invalida el token (venció, o se cambió la clave desde otro
+            // dispositivo), el panel deja de estar disponible aquí mismo.
+            useEffect(() => {
+                if (activeTab === 'ADMIN' && !adminSesion) {
+                    setActiveTab('CARTELERA');
+                    setAdminSubTab('DASHBOARD');
+                    setSurveys([]);
+                }
+            }, [activeTab, adminSesion]);
 
             // Mientras el tótem está suspendido, el salvapantallas muestra un reloj con
             // segundos: lo alimentamos con su propio intervalo para no tocar filterTime.
@@ -1006,8 +1058,10 @@ self.onmessage = function (e) {
                 };
 
                 const init = async () => {
-                    const cachedPin = safeStorage.getItem('totem_admin_pin');
-                    if (cachedPin) setAdminPin(cachedPin);
+                    // Limpieza de versiones anteriores: la clave maestra llegó a quedar
+                    // cacheada en claro aquí, y las encuestas guardaban nombre y correo.
+                    safeStorage.removeItem('totem_admin_pin');
+                    safeStorage.removeItem('totem_surveys_data');
                     const cachedVista = safeStorage.getItem('totem_vista_publica');
                     if (cachedVista) setVistaPublica(cachedVista);
                     const cachedTitulo = safeStorage.getItem('totem_titulo');
@@ -1052,30 +1106,15 @@ self.onmessage = function (e) {
                             const cached = safeStorage.getItem('totem_horarios_data');
                             if (cached) { try { const d = JSON.parse(cached); if (d.length) applyData(d); } catch(e2) {} }
                         }
-                        try {
-                            const { data: sRows, error: sErr } = await window._sb
-                                .from('totem_encuestas').select('*')
-                                .order('created_at', { ascending: false }).limit(500);
-                            if (!sErr && sRows) {
-                                const mapped = sRows.map(s => ({
-                                    rating: s.rating, comment: s.comment || '',
-                                    name: s.name || '', email: s.email || '',
-                                    date: new Date(s.created_at).toLocaleString('es-CL')
-                                }));
-                                setSurveys(mapped);
-                                safeStorage.setItem('totem_surveys_data', JSON.stringify(mapped));
-                            }
-                        } catch(e) {
-                            const cached = safeStorage.getItem('totem_surveys_data');
-                            if (cached) { try { setSurveys(JSON.parse(cached)); } catch(e2) {} }
-                        }
+                        // Las encuestas traen nombre y correo de quien responde: no se
+                        // cargan en el arranque público. El panel las pide con su token
+                        // (ver cargarEncuestas) una vez validada la clave.
                         try {
                             const { data: cfgRows } = await window._sb
                                 .from('totem_config').select('key, value');
                             if (Array.isArray(cfgRows)) {
                                 const cfgMap = {};
                                 cfgRows.forEach(r => { if (r && r.key) cfgMap[r.key] = r.value; });
-                                if (cfgMap.admin_pin) { setAdminPin(cfgMap.admin_pin); safeStorage.setItem('totem_admin_pin', cfgMap.admin_pin); }
                                 if (cfgMap.vista_publica) { setVistaPublica(cfgMap.vista_publica); safeStorage.setItem('totem_vista_publica', cfgMap.vista_publica); }
                                 if (cfgMap.titulo_totem) { setTituloTotem(cfgMap.titulo_totem); safeStorage.setItem('totem_titulo', cfgMap.titulo_totem); }
                                 if (cfgMap.barra_info) { try { setBarraInfo(normalizarBarraInfo(JSON.parse(cfgMap.barra_info))); safeStorage.setItem('totem_barra_info', cfgMap.barra_info); } catch (e) {} }
@@ -1101,8 +1140,6 @@ self.onmessage = function (e) {
                     } else {
                         const cached = safeStorage.getItem('totem_horarios_data');
                         if (cached) { try { const d = JSON.parse(cached); if (d.length) applyData(d); } catch(e) {} }
-                        const cachedSurveys = safeStorage.getItem('totem_surveys_data');
-                        if (cachedSurveys) { try { setSurveys(JSON.parse(cachedSurveys)); } catch(e) {} }
                         const cachedEx = safeStorage.getItem('totem_examenes_data');
                         if (cachedEx) { try { const ex = JSON.parse(cachedEx); if (ex.length) setExamenes(ex); } catch(e) {} }
                     }
@@ -1186,24 +1223,19 @@ self.onmessage = function (e) {
                 // se usa un "heartbeat" en la tabla totem_presencia (ver efecto más abajo).
 
 
-                // Realtime: nuevas encuestas en vivo
+                // Realtime: nuevas encuestas en vivo. Como la tabla de encuestas dejó
+                // de ser legible con la clave anónima, Realtime ya no puede entregar la
+                // fila; se escucha una señal sin datos y el panel recarga por RPC.
                 const surveyChannel = window._sb
                     .channel('totem_encuestas_rt')
                     .on('postgres_changes',
-                        { event: 'INSERT', schema: 'public', table: 'totem_encuestas' },
-                        (payload) => {
+                        { event: '*', schema: 'public', table: 'totem_encuestas_signal' },
+                        () => {
                             if (recentLocalSurveyRef.current) {
                                 recentLocalSurveyRef.current = false;
                                 return;
                             }
-                            const s = payload.new;
-                            setSurveys(prev => [{
-                                rating: s.rating,
-                                comment: s.comment || '',
-                                name: s.name || '',
-                                email: s.email || '',
-                                date: new Date(s.created_at).toLocaleString('es-CL')
-                            }, ...prev]);
+                            if (adminToken.current) cargarEncuestas();
                         }
                     )
                     .subscribe();
@@ -1290,7 +1322,6 @@ self.onmessage = function (e) {
                                 if (Array.isArray(cfgRows)) {
                                     const cfgMap = {};
                                     cfgRows.forEach(r => { if (r && r.key) cfgMap[r.key] = r.value; });
-                                    if (cfgMap.admin_pin) { setAdminPin(cfgMap.admin_pin); safeStorage.setItem('totem_admin_pin', cfgMap.admin_pin); }
                                     if (cfgMap.vista_publica) { setVistaPublica(cfgMap.vista_publica); safeStorage.setItem('totem_vista_publica', cfgMap.vista_publica); }
                                     if (cfgMap.titulo_totem) { setTituloTotem(cfgMap.titulo_totem); safeStorage.setItem('totem_titulo', cfgMap.titulo_totem); }
                                     if (cfgMap.barra_info) { try { setBarraInfo(normalizarBarraInfo(JSON.parse(cfgMap.barra_info))); safeStorage.setItem('totem_barra_info', cfgMap.barra_info); } catch (e) {} }
@@ -1417,20 +1448,15 @@ self.onmessage = function (e) {
                 }
                 setSabanaInfo({ status: 'subiendo', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
                 try {
-                    const { error } = await window._sb.from('totem_sabana').upsert({
-                        id: 1,
-                        data: datos,
-                        meta_eventos: meta || {},
-                        archivo_base64: base64,
-                        archivo_nombre: nombre,
-                        total_filas: datos.length,
-                        actualizado_en: ahora.toISOString()
-                    }, { onConflict: 'id' });
-                    if (error) throw error;
-                    // Señal liviana para que todos los tótems abiertos refresquen al instante
-                    await window._sb.from('totem_sabana_signal').upsert(
-                        { id: 1, version: ahora.toISOString() }, { onConflict: 'id' }
-                    ).then(() => {}, () => {});
+                    // La escritura la hace el servidor tras comprobar el token: la clave
+                    // anónima del navegador ya no puede tocar esta tabla. La función
+                    // emite además la señal para que los demás tótems refresquen.
+                    await rpcAdmin('totem_admin_guardar_sabana', {
+                        p_data: datos,
+                        p_meta: meta || {},
+                        p_base64: base64,
+                        p_nombre: nombre
+                    });
                     logEvento('admin_sabana_sync', { filas: datos.length, archivo: nombre });
                     setSabanaInfo({ status: 'sync', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
                 } catch (err) {
@@ -1443,14 +1469,14 @@ self.onmessage = function (e) {
                 setSabanaInfo(p => ({ ...p, descargando: true }));
                 try {
                     if (!window._sb) throw new Error('sin conexión');
-                    const { data, error } = await window._sb
-                        .from('totem_sabana').select('archivo_base64, archivo_nombre').eq('id', 1).maybeSingle();
-                    if (error || !data || !data.archivo_base64) {
+                    // El Excel original solo se entrega con sesión de administración.
+                    const data = await rpcAdmin('totem_admin_archivo_sabana', {});
+                    if (!data || !data.base64) {
                         alert('Aún no hay una sábana almacenada en el servidor para descargar. Sube una primero.');
                         return;
                     }
-                    const nombre = data.archivo_nombre || 'sabana_planificacion.xlsx';
-                    const blob = base64ToBlob(data.archivo_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    const nombre = data.nombre || 'sabana_planificacion.xlsx';
+                    const blob = base64ToBlob(data.base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url; a.download = nombre;
@@ -1507,24 +1533,22 @@ self.onmessage = function (e) {
                 // el límite de tamaño del servidor, así que en ese caso subimos solo los datos (lo esencial).
                 const MAX_BASE64 = 3000000; // ~3 MB
                 const incluirArchivoInicial = !!base64 && base64.length <= MAX_BASE64;
-                const fila = (conArchivo) => ({
-                    id: 1, data: datos,
-                    archivo_base64: conArchivo ? base64 : null,
-                    archivo_nombre: nombre, total_filas: datos.length, actualizado_en: ahora.toISOString()
+                // La escritura y la señal las hace el servidor tras comprobar el token.
+                const guardar = (conArchivo) => rpcAdmin('totem_admin_guardar_examenes', {
+                    p_data: datos,
+                    p_base64: conArchivo ? base64 : null,
+                    p_nombre: nombre
                 });
-                const emitirSenal = () => window._sb.from('totem_examenes_signal')
-                    .upsert({ id: 1, version: ahora.toISOString() }, { onConflict: 'id' }).then(() => {}, () => {});
                 try {
                     let conArchivo = incluirArchivoInicial;
-                    let { error } = await window._sb.from('totem_examenes').upsert(fila(conArchivo), { onConflict: 'id' });
-                    // Si falló incluyendo el archivo (probable exceso de tamaño), reintentar solo con los datos.
-                    if (error && conArchivo) {
+                    try {
+                        await guardar(conArchivo);
+                    } catch (err1) {
+                        // Si falló incluyendo el archivo (probable exceso de tamaño), reintentar solo con los datos.
+                        if (!conArchivo) throw err1;
                         conArchivo = false;
-                        const r2 = await window._sb.from('totem_examenes').upsert(fila(false), { onConflict: 'id' });
-                        error = r2.error;
+                        await guardar(false);
                     }
-                    if (error) throw error;
-                    await emitirSenal();
                     logEvento('admin_examenes_sync', { filas: datos.length, archivo: nombre, sin_archivo: !conArchivo });
                     setExamenesInfo({ status: conArchivo ? 'sync' : 'sync_sin_archivo', nombre, fecha: fechaTxt, filas: datos.length, descargando: false });
                 } catch(err) {
@@ -1537,13 +1561,13 @@ self.onmessage = function (e) {
                 setExamenesInfo(p => ({ ...p, descargando: true }));
                 try {
                     if (!window._sb) throw new Error('sin conexión');
-                    const { data, error } = await window._sb
-                        .from('totem_examenes').select('archivo_base64, archivo_nombre').eq('id', 1).maybeSingle();
-                    if (error || !data || !data.archivo_base64) {
+                    // El Excel original solo se entrega con sesión de administración.
+                    const data = await rpcAdmin('totem_admin_archivo_examenes', {});
+                    if (!data || !data.base64) {
                         alert('No hay un Excel original descargable. Si el archivo que subiste era muy pesado, los exámenes igual se publicaron, pero no se guardó el archivo original para descargar.'); return;
                     }
-                    const nombre = data.archivo_nombre || 'examenes.xlsx';
-                    const blob = base64ToBlob(data.archivo_base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    const nombre = data.nombre || 'examenes.xlsx';
+                    const blob = base64ToBlob(data.base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a'); a.href = url; a.download = nombre;
                     document.body.appendChild(a); a.click(); a.remove();
@@ -1559,10 +1583,7 @@ self.onmessage = function (e) {
             const eliminarExamenes = async () => {
                 if (!confirm('¿Eliminar todos los exámenes del servidor? Esta acción no se puede deshacer.')) return;
                 try {
-                    if (window._sb) {
-                        await window._sb.from('totem_examenes').delete().eq('id', 1);
-                        await window._sb.from('totem_examenes_signal').upsert({ id: 1, version: new Date().toISOString() }, { onConflict: 'id' }).then(() => {}, () => {});
-                    }
+                    if (window._sb) await rpcAdmin('totem_admin_borrar_examenes', {});
                     setExamenes([]);
                     setExamenesInfo({ status: 'idle', nombre: '', fecha: '', filas: 0, descargando: false });
                     safeStorage.setItem('totem_examenes_data', '[]');
@@ -1665,15 +1686,14 @@ self.onmessage = function (e) {
                 try {
                     setRecursosInfo(p => ({ ...p, status: 'subiendo', progreso: 0, filas: leidas, bloques: lista.length }));
                     for (let i = 0; i < lista.length; i += TAM) {
-                        const trozo = lista.slice(i, i + TAM).map(b => ({ ...b, lote }));
-                        const { error } = await window._sb.from('totem_bloques').insert(trozo);
-                        if (error) throw error;
+                        await rpcAdmin('totem_admin_bloques_insertar', {
+                            p_lote: lote, p_filas: lista.slice(i, i + TAM)
+                        });
                         setRecursosInfo(p => ({ ...p, progreso: Math.round(Math.min(i + TAM, lista.length) / lista.length * 100) }));
                     }
-                    await window._sb.from('totem_config').upsert({ key: 'bloques_lote', value: lote }, { onConflict: 'key' });
-                    await window._sb.from('totem_bloques_signal').upsert({ id: 1, version: lote }, { onConflict: 'id' }).then(() => {}, () => {});
-                    // Ya activado el lote nuevo, los anteriores sobran.
-                    await window._sb.from('totem_bloques').delete().neq('lote', lote).then(() => {}, () => {});
+                    // Activar el lote publica la configuración, emite la señal y borra
+                    // los lotes anteriores, todo del lado del servidor.
+                    await rpcAdmin('totem_admin_bloques_activar', { p_lote: lote });
                     setLoteActivo(lote);
                     const fechaTxt = new Date().toLocaleString('es-CL');
                     safeStorage.setItem('totem_recursos_nombre', nombre);
@@ -1686,7 +1706,7 @@ self.onmessage = function (e) {
                 } catch (err) {
                     console.error('Error subiendo bloques:', err);
                     // El lote a medio subir nunca se activó: se descarta para no dejar basura.
-                    await window._sb.from('totem_bloques').delete().eq('lote', lote).then(() => {}, () => {});
+                    await rpcAdmin('totem_admin_bloques_descartar', { p_lote: lote }).then(() => {}, () => {});
                     setRecursosInfo(p => ({ ...p, status: 'error', mensaje: (err && err.message) || 'No se pudieron guardar los bloques.' }));
                 }
             };
@@ -2036,10 +2056,9 @@ self.onmessage = function (e) {
                     ...surveyData,
                     date: new Date().toLocaleString('es-CL')
                 };
-                const updatedSurveys = [newSurvey, ...surveys];
-                setSurveys(updatedSurveys);
-                safeStorage.setItem('totem_surveys_data', JSON.stringify(updatedSurveys));
-                window.__INITIAL_SURVEYS__ = updatedSurveys;
+                // Solo se refleja en memoria: nombre y correo de quien responde no se
+                // guardan en el navegador del tótem, que es público.
+                setSurveys(prev => [newSurvey, ...prev]);
 
                 logEvento('encuesta_envio', {rating: surveyData.rating});
                 if (window._sb) {
@@ -2133,7 +2152,9 @@ self.onmessage = function (e) {
 
                 const appCode = scriptElement.textContent;
                 const safeData = JSON.stringify(data).replace(/</g, '\\u003c');
-                const safeSurveys = JSON.stringify(surveys).replace(/</g, '\\u003c');
+                // El HTML exportado no lleva encuestas: contienen datos personales y el
+                // archivo puede terminar en cualquier parte. Las carga del servidor.
+                const safeSurveys = '[]';
                 const safeMetrics = JSON.stringify(metrics).replace(/</g, '\\u003c');
 
                 const sOpen = '<' + 'script>';
@@ -2206,30 +2227,87 @@ self.onmessage = function (e) {
                 setTimeout(() => URL.revokeObjectURL(url), 150);
             };
 
-            const handlePasswordSubmit = () => {
-                if (passwordInput === adminPin) {
-                    if (passwordAction === 'ADMIN') {
-                        setActiveTab('ADMIN');
-                        logEvento('admin_acceso');
-                    } else if (passwordAction === 'FULLSCREEN_ENTER') {
-                        document.documentElement.requestFullscreen().catch(() => {});
-                    } else if (passwordAction === 'FULLSCREEN_EXIT') {
-                        authorizedFullscreenExit.current = true;
-                        document.exitFullscreen();
-                    } else if (passwordAction === 'UNLOCK_KIOSK') {
-                        setKioskLocked(false);
-                        document.documentElement.requestFullscreen().catch(() => {});
-                    }
-                    setShowPasswordModal(false);
-                    setPasswordInput('');
-                    setPasswordError(false);
-                } else {
+            // Las encuestas guardan nombre y correo: solo se piden con una sesión de
+            // administración válida, nunca en la carga pública del tótem.
+            const cargarEncuestas = async () => {
+                try {
+                    const filas = await rpcAdmin('totem_admin_encuestas', { p_limite: 500 });
+                    if (!Array.isArray(filas)) return;
+                    setSurveys(filas.map(s => ({
+                        rating: s.rating,
+                        comment: s.comment || '',
+                        name: s.name || '',
+                        email: s.email || '',
+                        date: new Date(s.created_at).toLocaleString('es-CL')
+                    })));
+                } catch (e) {}
+            };
+
+            // La clave se verifica en el servidor: nunca se descarga al navegador.
+            const handlePasswordSubmit = async () => {
+                if (passwordBusy) return;
+                if (!passwordInput) { setPasswordError(true); setPasswordMsg('Ingresa la clave.'); return; }
+                if (!window._sb) {
                     setPasswordError(true);
+                    setPasswordMsg('Sin conexión con el servidor: no se puede validar la clave.');
+                    return;
                 }
+                setPasswordBusy(true);
+                setPasswordError(false);
+                setPasswordMsg('');
+                let res;
+                try {
+                    const { data, error } = await window._sb.rpc('totem_admin_login', {
+                        p_pin: passwordInput, p_cliente: sessionId
+                    });
+                    if (error) throw error;
+                    res = data;
+                } catch (e) {
+                    setPasswordBusy(false);
+                    setPasswordError(true);
+                    setPasswordMsg('No se pudo validar la clave. Revisa la conexión.');
+                    return;
+                }
+                setPasswordBusy(false);
+                setPasswordInput('');
+                if (!res || !res.ok) {
+                    setPasswordError(true);
+                    setPasswordMsg(res && res.motivo === 'bloqueado'
+                        ? 'Demasiados intentos fallidos. Espera unos minutos.'
+                        : 'Clave incorrecta.');
+                    return;
+                }
+
+                adminToken.current = res.token;
+                setAdminSesion(true);
+                setShowPasswordModal(false);
+                setPasswordMsg('');
+
+                if (passwordAction === 'ADMIN') {
+                    setActiveTab('ADMIN');
+                    logEvento('admin_acceso');
+                    cargarEncuestas();
+                    return;
+                }
+                // Salir de pantalla completa o desbloquear el kiosco solo necesita
+                // comprobar la clave: la sesión se cierra de inmediato.
+                if (passwordAction === 'FULLSCREEN_ENTER') {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                } else if (passwordAction === 'FULLSCREEN_EXIT') {
+                    authorizedFullscreenExit.current = true;
+                    document.exitFullscreen();
+                } else if (passwordAction === 'UNLOCK_KIOSK') {
+                    setKioskLocked(false);
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
+                cerrarSesionAdmin(true);
             };
 
             const openSecurityModal = (actionType) => {
                 setPasswordAction(actionType);
+                setPasswordInput('');
+                setPasswordError(false);
+                setPasswordMsg('');
                 setShowPasswordModal(true);
             };
 
@@ -2237,35 +2315,30 @@ self.onmessage = function (e) {
                 const current = pinChange.current.trim();
                 const next = pinChange.next.trim();
                 const confirm = pinChange.confirm.trim();
-                if (current !== adminPin) {
-                    setPinChange(p => ({ ...p, status: 'error', msg: 'La contraseña actual es incorrecta.' }));
-                    return;
-                }
-                if (next.length < 4) {
-                    setPinChange(p => ({ ...p, status: 'error', msg: 'La nueva contraseña debe tener al menos 4 caracteres.' }));
+                // La clave actual la valida el servidor contra el hash: el navegador
+                // no tiene con qué compararla y aquí solo se revisa lo evidente.
+                if (next.length < 6) {
+                    setPinChange(p => ({ ...p, status: 'error', msg: 'La nueva contraseña debe tener al menos 6 caracteres.' }));
                     return;
                 }
                 if (next !== confirm) {
                     setPinChange(p => ({ ...p, status: 'error', msg: 'La confirmación no coincide.' }));
                     return;
                 }
-                if (next === adminPin) {
-                    setPinChange(p => ({ ...p, status: 'error', msg: 'La nueva contraseña es igual a la actual.' }));
-                    return;
-                }
                 setPinChange(p => ({ ...p, status: 'saving', msg: '' }));
                 try {
-                    if (window._sb) {
-                        const { error } = await window._sb.from('totem_config').upsert(
-                            { key: 'admin_pin', value: next, updated_at: new Date().toISOString() },
-                            { onConflict: 'key' }
-                        );
-                        if (error) throw error;
+                    const res = await rpcAdmin('totem_admin_cambiar_pin', { p_actual: current, p_nueva: next });
+                    if (!res || !res.ok) {
+                        const motivos = {
+                            actual: 'La contraseña actual es incorrecta.',
+                            corta:  'La nueva contraseña debe tener al menos 6 caracteres.',
+                            igual:  'La nueva contraseña es igual a la actual.'
+                        };
+                        setPinChange(p => ({ ...p, status: 'error', msg: (res && motivos[res.motivo]) || 'No se pudo actualizar la contraseña.' }));
+                        return;
                     }
-                    setAdminPin(next);
-                    safeStorage.setItem('totem_admin_pin', next);
                     logEvento('admin_pin_cambio');
-                    setPinChange({ current: '', next: '', confirm: '', status: 'success', msg: '✓ Contraseña actualizada. Aplica en todos los dispositivos.' });
+                    setPinChange({ current: '', next: '', confirm: '', status: 'success', msg: '✓ Contraseña actualizada. Cerró las sesiones abiertas en otros dispositivos.' });
                 } catch (e) {
                     setPinChange(p => ({ ...p, status: 'error', msg: 'No se pudo guardar. Revisa la conexión e intenta de nuevo.' }));
                 }
@@ -2274,11 +2347,7 @@ self.onmessage = function (e) {
             // Guarda en totem_config (key/value) y persiste localmente. Se sincroniza por Realtime a todos los tótems.
             const guardarConfig = async (key, value) => {
                 if (!window._sb) return false;
-                const { error } = await window._sb.from('totem_config').upsert(
-                    { key, value, updated_at: new Date().toISOString() },
-                    { onConflict: 'key' }
-                );
-                if (error) throw error;
+                await rpcAdmin('totem_admin_set_config', { p_key: key, p_value: value });
                 return true;
             };
 
@@ -4144,15 +4213,15 @@ self.onmessage = function (e) {
                                 
                                 <input 
                                     type="password" autoFocus placeholder="••••••"
-                                    value={passwordInput} 
-                                    onChange={e => {setPasswordInput(e.target.value); setPasswordError(false)}} 
+                                    value={passwordInput} disabled={passwordBusy}
+                                    onChange={e => {setPasswordInput(e.target.value); setPasswordError(false); setPasswordMsg('');}} 
                                     onKeyDown={e => e.key === 'Enter' && handlePasswordSubmit()}
-                                    className={`w-full border-[3px] rounded-xl px-4 py-3 lg:px-5 lg:py-4 text-center text-2xl lg:text-3xl tracking-widest outline-none mb-3 transition-colors dark:bg-slate-800 dark:text-white ${passwordError ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:border-red-500'}`}
+                                    className={`w-full border-[3px] rounded-xl px-4 py-3 lg:px-5 lg:py-4 text-center text-2xl lg:text-3xl tracking-widest outline-none mb-3 transition-colors dark:bg-slate-800 dark:text-white disabled:opacity-60 ${passwordError ? 'border-red-400 bg-red-50' : 'border-slate-300 focus:border-red-500'}`}
                                 />
-                                {passwordError && <div className="text-red-600 font-bold mb-4 lg:mb-5 text-base lg:text-lg">Clave incorrecta. Intente nuevamente.</div>}
+                                {passwordError && <div className="text-red-600 font-bold mb-4 lg:mb-5 text-base lg:text-lg">{passwordMsg || 'Clave incorrecta. Intente nuevamente.'}</div>}
                                 
-                                <button onClick={handlePasswordSubmit} className="w-full bg-red-600 text-white rounded-xl py-3 lg:py-4 font-black text-lg lg:text-xl hover:bg-red-700 transition-colors shadow-lg">
-                                    Desbloquear Pantalla
+                                <button onClick={handlePasswordSubmit} disabled={passwordBusy} className="w-full bg-red-600 text-white rounded-xl py-3 lg:py-4 font-black text-lg lg:text-xl hover:bg-red-700 transition-colors shadow-lg disabled:opacity-60">
+                                    {passwordBusy ? 'Comprobando…' : 'Desbloquear Pantalla'}
                                 </button>
                             </div>
                         </div>
@@ -4161,7 +4230,7 @@ self.onmessage = function (e) {
                     {showPasswordModal && !kioskLocked && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center animate-fade-in px-4">
                             <div className="bg-white dark:bg-duoc-card p-8 lg:p-10 rounded-[2rem] shadow-2xl max-w-sm w-full relative border dark:border-slate-700">
-                                <button onClick={() => {setShowPasswordModal(false); setPasswordInput(''); setPasswordError(false);}} className="absolute top-4 right-4 lg:top-6 lg:right-6 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors bg-slate-100 dark:bg-slate-800 p-2 rounded-full">
+                                <button onClick={() => {setShowPasswordModal(false); setPasswordInput(''); setPasswordError(false); setPasswordMsg('');}} className="absolute top-4 right-4 lg:top-6 lg:right-6 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors bg-slate-100 dark:bg-slate-800 p-2 rounded-full">
                                     <Icons.X cls="w-5 h-5 lg:w-6 lg:h-6"/>
                                 </button>
                                 <div className="w-14 h-14 lg:w-16 lg:h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4 lg:mb-5 mx-auto">
@@ -4172,17 +4241,17 @@ self.onmessage = function (e) {
                                 
                                 <input 
                                     type="password" autoFocus placeholder="••••••"
-                                    value={passwordInput} 
-                                    onChange={e => {setPasswordInput(e.target.value); setPasswordError(false)}} 
+                                    value={passwordInput} disabled={passwordBusy}
+                                    onChange={e => {setPasswordInput(e.target.value); setPasswordError(false); setPasswordMsg('');}} 
                                     onKeyDown={e => e.key === 'Enter' && handlePasswordSubmit()}
-                                    className={`w-full border-[3px] rounded-xl px-4 py-3 text-center text-xl lg:text-2xl tracking-widest outline-none mb-2 transition-colors dark:bg-slate-800 dark:text-white ${passwordError ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'border-slate-200 dark:border-slate-600 focus:border-duoc-lightblue dark:focus:border-duoc-yellow'}`}
+                                    className={`w-full border-[3px] rounded-xl px-4 py-3 text-center text-xl lg:text-2xl tracking-widest outline-none mb-2 transition-colors dark:bg-slate-800 dark:text-white disabled:opacity-60 ${passwordError ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'border-slate-200 dark:border-slate-600 focus:border-duoc-lightblue dark:focus:border-duoc-yellow'}`}
                                 />
-                                <div className="h-5 lg:h-6 mb-2 lg:mb-3 text-center">
-                                    {passwordError && <span className="text-red-500 dark:text-red-400 text-xs lg:text-sm font-bold">Clave incorrecta</span>}
+                                <div className="min-h-[1.25rem] lg:min-h-[1.5rem] mb-2 lg:mb-3 text-center">
+                                    {passwordError && <span className="text-red-500 dark:text-red-400 text-xs lg:text-sm font-bold">{passwordMsg || 'Clave incorrecta'}</span>}
                                 </div>
                                 
-                                <button onClick={handlePasswordSubmit} className="w-full bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl py-3 lg:py-3.5 font-bold text-base lg:text-lg hover:bg-[#004080] dark:hover:bg-yellow-400 transition-colors shadow-md">
-                                    Confirmar
+                                <button onClick={handlePasswordSubmit} disabled={passwordBusy} className="w-full bg-duoc-blue dark:bg-duoc-yellow text-white dark:text-duoc-blue rounded-xl py-3 lg:py-3.5 font-bold text-base lg:text-lg hover:bg-[#004080] dark:hover:bg-yellow-400 transition-colors shadow-md disabled:opacity-60">
+                                    {passwordBusy ? 'Comprobando…' : 'Confirmar'}
                                 </button>
                             </div>
                         </div>
